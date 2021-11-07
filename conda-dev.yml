@@ -1,0 +1,23 @@
+name: ransac-flow
+
+channels:
+  - defaults
+  - conda-forge
+
+dependencies:
+  # core
+  - python=3.8
+  - pip
+  - ipykernel
+  # development
+  - black
+  # math libs, accelerated
+  - numpy
+  - scipy
+  # others
+  - matplotlib
+
+  - scikit-image
+
+  - pip:
+    - opencv-contrib-python-headless
