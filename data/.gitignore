@@ -1,0 +1,5 @@
+# ignore all downloaded data in this folder
+*
+
+# we still need this file
+!.gitignore
