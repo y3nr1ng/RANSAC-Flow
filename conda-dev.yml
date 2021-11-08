@@ -1,4 +1,4 @@
-name: ransac-flow
+name: ransacflow
 
 channels:
   - defaults
@@ -8,16 +8,19 @@ dependencies:
   # core
   - python=3.8
   - pip
-  - ipykernel
+  # this pulls in ipy* packages, allow integration with jupyter
+  - ipywidgets
   # development
   - black
+  - flake8
   # math libs, accelerated
   - numpy
   - scipy
   # others
   - matplotlib
-
   - scikit-image
-
   - pip:
-    - opencv-contrib-python-headless
+    # use pip to avoid install cudatoolkit from conda
+    - torch
+    - torchvision
+    #- opencv-contrib-python-headless
