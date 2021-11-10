@@ -1,12 +1,9 @@
-from pathlib import Path
-
 import kornia as K
 import numpy as np
 import torch
 import torch.nn as nn
 from ransacflow.util import get_model_root
 from torchvision import models, transforms
-from torchvision.transforms import InterpolationMode
 
 
 def get_resnet50_moco_state_dict() -> dict:
@@ -38,52 +35,15 @@ def get_resnet50_moco_state_dict() -> dict:
 def create_grid(feature: torch.Tensor):
     """Geenerate (W, H) grid for a tensor."""
     nh, nw = feature.shape[-2:]
-    ws = torch.arange(0, nw)
-    hs = torch.arange(0, nh)
+    ws = torch.arange(0, nw, device=feature.device)
+    hs = torch.arange(0, nh, device=feature.device)
     w, h = torch.meshgrid(ws, hs, indexing="xy")
 
     # shift the grid so they are centered on pixels
     w = (w + 0.5) / nw
     h = (h + 0.5) / nh
 
-    return (w, h)
-
-def mutual_matching():
-    pass
-
-class ResizeToMax(nn.Module):
-    """
-    Resize the input image within a maximum value.
-
-    Args:
-        max_size (int): The maximum allowd for the longer edge of the resize image.
-        interpolation (InterpolationMode): Desired interpolation method.
-    """
-
-    def __init__(
-        self,
-        max_size: int,
-        interpolation: InterpolationMode = InterpolationMode.BILINEAR,
-    ):
-        super().__init__()
-
-        self.max_size = max_size
-        self.interpolation = interpolation
-
-    def forward(self, im: torch.Tensor):
-        """
-        Args:
-            im (Tensor): Image to be scaled.
-        """
-        ny, nx = im.shape[-2:]  # [..., H, W]
-
-        # determine new shape
-        ratio = max(float(nx) / self.max_size, float(ny) / self.max_size)
-        nx, ny = int(round(nx / ratio)), int(round(ny / ratio))
-
-        return transforms.functional.resize(
-            im, (ny, nx), interpolation=self.interpolation
-        )
+    return (h, w)
 
 
 class CoarseAlignment(nn.Module):
@@ -103,8 +63,8 @@ class CoarseAlignment(nn.Module):
         self,
         n_scales: int = 7,
         scale_ratio: float = 1.2,
+        threshold: float = 0.05,
         max_iter: int = 10000,
-        max_size: int = 400,
         use_moco: bool = False,
     ):
         super().__init__()
@@ -114,18 +74,11 @@ class CoarseAlignment(nn.Module):
             raise ValueError("'n_scales' has to be odd")
         if scale_ratio <= 1:
             raise ValueError("'scale_ratio' has to be >= 1")
-        self.max_iter = max_iter
 
         # preprocess routines
-        preprocess = transforms.Compose(
-            [
-                ResizeToMax(max_size),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                ),
-            ]
+        self.resnet_normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
         )
-        self.preprocess = preprocess
 
         # load resnet50
         if not use_moco:
@@ -161,20 +114,10 @@ class CoarseAlignment(nn.Module):
             ]
         )
 
-        # kornia.geometry.ransac
-        #   model_type:
-        #   inl_th, inlier_threshold
-        #   batch_size:
-        #   max_iter: max_iteration
-        #   confidence
-        #   max_lo_iters: max_local_iterations
-
         self.ransac = K.geometry.RANSAC(
             model_type="homography",  # we only work with homography
-            inl_th=2,
-            batch_size=2048,
-            max_iter=self.max_iter,
-            confidence=0.99,
+            inl_th=threshold,
+            max_iter=max_iter,
         )
 
     def forward(self, I_src: torch.Tensor, I_dst: torch.Tensor):
@@ -187,17 +130,24 @@ class CoarseAlignment(nn.Module):
             I_src (Tensor):
             I_dst (Tensor):
         """
-        feature_dst, grid_dst = self._extract_dst_feature(I_dst)
-        feature_src, grid_src = self._extract_src_multiscale_feature(I_src)
+        feature_dst, (h_dst, w_dst) = self._extract_feature(I_dst)
+        feature_src, (h_src, w_src) = self._extract_multiscale_feature(I_src)
 
         _, matches = K.feature.match_mnn(feature_src, feature_dst)
 
-        # TODO do ransac with matches
-        kp_src, kp_dst = matches[:, :], matches[:, :]
-        model, inliers = self.ransac(kp_src, kp_dst)
+        kp_src = torch.stack([h_src[matches[:, 0]], w_src[matches[:, 0]]], dim=-1)
+        kp_dst = torch.stack([h_dst[matches[:, 1]], w_dst[matches[:, 1]]], dim=-1)
 
-    def _extract_dst_feature(self, image: torch.Tensor):
-        """Extract destination feature map.
+        model, _ = self.ransac(kp_src, kp_dst)
+
+        # warp the result
+        warper = K.geometry.HomographyWarper(*I_src.shape[-2:])
+        I_src_warp = warper(I_src.unsqueeze(0), model.unsqueeze(0))
+
+        return I_src_warp
+
+    def _extract_feature(self, image: torch.Tensor):
+        """Extract feature map for a given image.
 
         Args:
             image (Tensor): [description]
@@ -205,21 +155,24 @@ class CoarseAlignment(nn.Module):
         Returns:
             TBD
         """
-        image = self.preprocess(image)
+        image = self.resnet_normalize(image)
 
         image = image.unsqueeze(0)  # [C, H, W] -> [B, C, H, W]
         feature = self.resnet(image)
         feature = nn.functional.normalize(feature)
 
+        h, w = create_grid(feature)
+        h = torch.flatten(h)
+        w = torch.flatten(w)
+
         feature = torch.flatten(feature, start_dim=-2)
-        feature = feature.t()
-        grid = create_grid(feature)
+        feature = feature.squeeze().t()  # [1, D, N] -> [N, D]
 
-        return feature, grid
+        return feature, (h, w)
 
-    def _extract_src_multiscale_feature(self, image: torch.Tensor):
+    def _extract_multiscale_feature(self, image: torch.Tensor):
         """
-        Build source feature map within multiple scales.
+        Build feature map within predefined multiple scales.
 
         Args:
             image (Tensor):
@@ -227,14 +180,22 @@ class CoarseAlignment(nn.Module):
         Returns:
 
         """
-        image = self.preprocess(image)
+        feature_list = []
+        h_list = []
+        w_list = []
+        for scale in self.scale_list:
+            image_scaled = K.geometry.transform.rescale(
+                image, scale, align_corners=False
+            )
 
-        image = image.unsqueeze(0)  # [C, H, W] -> [B, C, H, W]
-        feature = self.resnet(image)
-        feature = nn.functional.normalize(feature)
+            feature, (h, w) = self._extract_feature(image_scaled)
+            feature_list.append(feature)
+            h_list.append(h)
+            w_list.append(w)
 
-        feature = torch.flatten(feature, start_dim=-2)
-        feature = feature.t()
-        print(feature.shape)
+        # concat results from every scale as if finding additional keypoints
+        feature_list = torch.vstack(feature_list)
+        h_list = torch.hstack(h_list)
+        w_list = torch.hstack(w_list)
 
-        return None, None
+        return feature_list, (h_list, w_list)
