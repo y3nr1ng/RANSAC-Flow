@@ -7,6 +7,8 @@ TODO some description about this project and its origin
 ### Prerequisite
 TODO package requirement
 ### Demo
+Please be aware that this project is designed to work under *editable mode*! It needs to download files to get it up and running, and these destination folder are parallel to the project folder.
+
 TODO what notebook to run
 ## Development
 ### Dataset
