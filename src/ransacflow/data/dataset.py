@@ -6,7 +6,7 @@ from typing import Any, BinaryIO, Callable, Dict, List, Optional, Tuple
 
 import skimage.io
 from torchvision.datasets import ImageFolder
-from torchvision.datasets.folder import default_loader, has_file_allowed_extension
+from torchvision.datasets.folder import has_file_allowed_extension
 
 default_loader = skimage.io.imread
 
@@ -53,7 +53,7 @@ class ZippedImageFolder(ImageFolder):
         """
         # normalize directory with trailing slash
         #   https://bugs.python.org/issue21039
-        directory /= ''
+        directory /= ""
         if not directory.exists():
             raise ValueError(f"unable to locate '{directory}' in the ZIP file")
 
@@ -93,7 +93,7 @@ class ZippedImageFolder(ImageFolder):
             )
         if extensions is not None:
             # x should be a Path-like object
-            is_valid_file = lambda x: has_file_allowed_extension(x.name, extensions)
+            is_valid_file = lambda x: has_file_allowed_extension(x, extensions)
 
         instances = []
         available_classes = set()
@@ -103,6 +103,7 @@ class ZippedImageFolder(ImageFolder):
             if not target_dir.is_dir():
                 continue
             for file in target_dir.iterdir():
+                file = file.name  # we only want str
                 if is_valid_file(file):
                     item = file, class_index
                     instances.append(item)
@@ -127,7 +128,10 @@ class ZippedImageFolder(ImageFolder):
             (sample, target) where target is class_index of the target class.
         """
         path, target = self.samples[index]
-        sample = self.loader(path)
+
+        fp = io.BytesIO(path.read_bytes())
+        sample = self.loader(fp)
+
         if self.transform is not None:
             sample = self.transform(sample)
         if self.target_transform is not None:
