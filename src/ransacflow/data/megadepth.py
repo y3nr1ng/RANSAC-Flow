@@ -29,18 +29,17 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
         instances = []
         available_classes = set()
         for target_class in sorted(class_to_idx.keys()):
+            print(target_class)
             class_index = class_to_idx[target_class]
             target_dir = directory / target_class
-            if not target_dir.is_dir():
-                continue
             for file in target_dir.iterdir():
                 file = file.name  # we only want str
-                if is_valid_file(file):
-                    item = file, class_index
-                    instances.append(item)
+                # if is_valid_file(file):
 
-                    if target_class not in available_classes:
-                        available_classes.add(target_class)
+                item = file, class_index
+                instances.append(item)
+
+                available_classes.add(target_class)
 
         empty_classes = set(class_to_idx.keys()) - available_classes
         if empty_classes:
@@ -50,9 +49,30 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
 
         return instances
 
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        return super().__getitem__(index)
+
+    def __len__(self):
+        return len(self.classes)
+
+
 class MegaDepthValidationDataset(ZippedImageFolder):
-    pass
+    def __init__(self, root: Path, directory: Optional[Path] = "/", *args, **kwargs):
+        # pass images directory to super
+        super().__init__(root, directory / "images", *args, **kwargs)
+
+        # TODO modify find_classes to use the matches.csv
+
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        return super().__getitem__(index)
 
 
 class MegaDepthTestingDataset(ZippedImageFolder):
-    pass
+    def __init__(self, root: Path, directory: Optional[Path] = "/", *args, **kwargs):
+        # pass images directory to super
+        super().__init__(root, directory / "images", *args, **kwargs)
+
+        # TODO modify find_classes to use the matches.csv
+
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        return super().__getitem__(index)
