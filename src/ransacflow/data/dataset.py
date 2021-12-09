@@ -1,5 +1,4 @@
 import io
-import os
 import zipfile
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, List, Optional, Tuple
