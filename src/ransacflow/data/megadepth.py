@@ -1,5 +1,6 @@
 import io
 import logging
+import pickle
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -34,7 +35,7 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
             )
         if extensions is not None:
             # x should be a Path-like object
-            logger.warning("file integrity is not tested")
+            logger.warning("file integrity is not explicitly tested")
 
         instances = []
         for target_class in sorted(class_to_idx.keys()):
@@ -49,13 +50,13 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
 
         return instances
 
-    def __getitem__(self, index: int) -> Tuple[Any, Any]:
-        # we need 2 images, randomly choose from 3
-        i0, i1 = self._rng.choice(3, size=2)
-        I0, I1 = super().__getitem__(i0), super().__getitem__(i1)
-        return {"I0": I0, "I1": I1}  # TODO should we return dict instead of tuple?
+    def __getitem__(self, index: int):
+        # we need 2 images, randomly choose from [i+0]-[i+2] (3 images)
+        offsets = self._rng.choice(3, size=2)
+        image_pair = tuple(super().__getitem__(index + offset) for offset in offsets)
+        return image_pair
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.classes)
 
 
@@ -91,15 +92,16 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         # but, our match list is one folder upward
         path = directory.parent / "matches.csv"
         fp = io.BytesIO(path.read_bytes())
-        self._matches = pd.read_csv(fp)
+        matches = pd.read_csv(fp)
 
         # matches[scene] contains the class as integer, convert to list of str
         #   https://pandas.pydata.org/pandas-docs/stable/user_guide/text.html
-        classes = self._matches["scene"].astype("string").tolist()
-        for class_idx in classes:
-            class_path = directory / str(class_idx)
+        classes = matches["scene"].astype("string").tolist()
+        classes = list(set(classes))
+        for cls_name in classes:
+            class_path = directory / cls_name
             if not class_path.exists():
-                raise FileNotFoundError(f"could not find '{class_idx}'")
+                raise FileNotFoundError(f"could not find '{cls_name}'")
 
         class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
         return classes, class_to_idx
@@ -111,12 +113,79 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         extensions: Optional[Tuple[str, ...]] = None,
         is_valid_file: Optional[Callable[[str], bool]] = None,
     ) -> List[Tuple[str, int]]:
-        # TODO build dataset based on matches.csv
+        if class_to_idx is None:
+            # we explicitly want to use `find_classes` method
+            raise ValueError("'class_to_idx' parameter cannot be None")
 
-        pass
+        if not ((extensions is None) ^ (is_valid_file is None)):
+            raise ValueError(
+                "both 'extensions' and 'is_valid_file' cannot be None or not None at the same time"
+            )
+        if extensions is not None:
+            # x should be a Path-like object
+            logger.warning("file integrity is not explicitly tested")
 
-    def __getitem__(self, index: int) -> Tuple[Any, Any]:
-        return super().__getitem__(index)
+        # normalize directory with trailing slash
+        #   https://bugs.python.org/issue21039
+        directory /= ""
+
+        # we don't want to work with DataFrame, convert them all to ndarray
+        path = directory.parent / "matches.csv"
+        fp = io.BytesIO(path.read_bytes())
+        matches = pd.read_csv(fp)
+        # convert some units first
+        matches["scene"] = matches["scene"].astype("string")
+
+        # load ground truth transformation matrix
+        path = directory.parent / "affine.pkl"
+        with path.open("r") as fp:
+            # it was stored as a dictionary
+            affine_mats = pickle.load(fp)
+
+        instances = []
+        for (_, row), affine_mat in zip(matches.iterrows(), affine_mats.values()):
+            # class name
+            cls_name = row["scene"]
+            class_index = class_to_idx[cls_name]
+
+            # zipfile.Path to image
+            src_path, tgt_path = row["source_image"], row["target_image"]
+            src_path = directory / cls_name / src_path
+            tgt_path = directory / cls_name / tgt_path
+
+            # load and compact feature coordinates
+            src_feat_x = np.fromstring(row["XA"], dtype=np.float32, sep=";")
+            src_feat_y = np.fromstring(row["YA"], dtype=np.float32, sep=";")
+            src_feat = np.stack([src_feat_y, src_feat_x], axis=-1)
+            tgt_feat_x = np.fromstring(row["XB"], dtype=np.float32, sep=";")
+            tgt_feat_y = np.fromstring(row["YB"], dtype=np.float32, sep=";")
+            tgt_feat = np.stack([tgt_feat_y, tgt_feat_x], axis=-1)
+
+            # NOTE
+            # ground truth affine transformation matrix is stored directly
+
+            item = (src_path, src_feat), (tgt_path, tgt_feat), affine_mat, class_index
+            instances.append(item)
+
+        return instances
+
+    def __getitem__(self, index: int):
+        source, target, affine_mat, _ = self.samples[index]
+        src_path, src_feat = source
+        tgt_path, tgt_feat = target
+
+        # load source and target images
+        fp = io.BytesIO(src_path.read_bytes())
+        src_image = self.loader(fp)
+        fp = io.BytesIO(tgt_path.read_bytes())
+        tgt_image = self.loader(fp)
+
+        if self.transform is not None:
+            src_image, src_feat = self.transform(src_image, src_feat)
+        if self.target_transform is not None:
+            tgt_image, tgt_feat = self.target_transform(tgt_image, tgt_feat)
+
+        return (src_path, src_feat), (tgt_path, tgt_feat), affine_mat
 
 
 class MegaDepthTestingDataset(ZippedImageFolder):
@@ -124,9 +193,7 @@ class MegaDepthTestingDataset(ZippedImageFolder):
         # pass images directory to super
         super().__init__(root, directory / "images", *args, **kwargs)
 
-        # after __init__, root now holds the opened zipfile.Path reference
-
-        # TODO modify find_classes to use the matches.csv
+        # TODO reuse MegaDepthValidationDataset, but ignore ground truth affine matrix
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         return super().__getitem__(index)

@@ -137,6 +137,3 @@ class ZippedImageFolder(ImageFolder):
             target = self.target_transform(target)
 
         return sample, target
-
-    def __len__(self):
-        return len(self.samples)
