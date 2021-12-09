@@ -76,13 +76,13 @@ class CoarseAlignment(nn.Module):
             raise ValueError("'scale_ratio' has to be >= 1")
 
         # preprocess routines
-#         self.resnet_normalize = transforms.Normalize(
-#             mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-#         )
+        self.resnet_normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
 
         # load resnet50
         if not use_moco:
-            resnet = models.resnet50()
+            resnet = models.resnet50(pretrained=True)
         else:
             resnet = models.resnet50()
 
