@@ -13,6 +13,8 @@ from torchvision.datasets.folder import has_file_allowed_extension
 
 from .dataset import ZippedImageFolder
 
+__all__ = ["MegaDepthDataModule"]
+
 logger = logging.getLogger("ransacflow.data.megadepth")
 
 
