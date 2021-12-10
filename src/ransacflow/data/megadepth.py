@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+from numpy.random.mtrand import shuffle
 import pandas as pd
+import pytorch_lightning as pl
+import torch
 from torchvision.datasets.folder import has_file_allowed_extension
 
 from .dataset import ZippedImageFolder
@@ -197,3 +200,49 @@ class MegaDepthTestingDataset(ZippedImageFolder):
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         return super().__getitem__(index)
+
+
+class MegaDepthDataModule(pl.LightningDataModule):
+    """[summary]
+
+    Args:
+        path (Path): Path to the ZIP file.
+        batch_size (int, optional): How many samples per batch to load.
+    """
+
+    def __init__(self, path: Path, batch_size: int = 16):
+        super().__init__()
+
+        self.path = path
+        self.batch_size = batch_size
+
+    def setup(self):
+        self.megadepth_train = MegaDepthTrainingDataset(self.path, "train")
+        self.megadepth_val = MegaDepthValidationDataset(self.path, "validate")
+
+    def train_dataloader(self):
+        """
+        root: Path,
+        directory: Optional[Path] = "/",
+        transform: Optional[Callable] = None,
+        target_transform: Optional[Callable] = None,
+        loader: Callable[[BinaryIO], Any] = default_loader,
+        is_valid_file: Optional[Callable[[str], bool]] = None,
+        """
+        megadepth_train = torch.utils.data.DataLoader(
+            self.megadepth_train,
+            batch_size=self.batch_size,
+            shuffle=True,
+            drop_last=True,
+        )
+        return megadepth_train
+
+    def val_dataloader(self):
+        # TODO should we drop_last for validation?
+        megadepth_val = torch.utils.data.DataLoader(
+            self.megadepth_val,
+            batch_size=self.batch_size,
+            shuffle=False,
+            drop_last=True,
+        )
+        return megadepth_val
