@@ -28,7 +28,7 @@ if not sys.warnoptions:
     warnings.simplefilter("ignore")
 
 
-def computeLossMatchability(network, I, indexRoll, grid, maskMargin, args, ssim):
+def computeLossMatchability(network, I, indexRoll, grid, maskMargin, args, SSIM):
 
     f = F.normalize(network['netFeatCoarse'](I), p=2, dim=1)
     
@@ -50,7 +50,7 @@ def computeLossMatchability(network, I, indexRoll, grid, maskMargin, args, ssim)
 
     ## Reconstruction Loss 3 channels 
     IWarp = F.grid_sample(I, final)
-    lossLr =  ssim(IWarp, I[indexRoll], matchCycle)
+    lossLr =  SSIM(IWarp, I[indexRoll], args.margin)
     
     ## matchability loss
     lossMatch = torch.sum(torch.abs(1 - matchCycle) * maskMargin) / (torch.sum(maskMargin) + 0.001) 
@@ -70,7 +70,7 @@ def computeLossMatchability(network, I, indexRoll, grid, maskMargin, args, ssim)
     return lossLr.item(), lossCycle.item(), lossMatch.item(), lossGrad.item(), loss      
 
 ## combine loss and gradloss together
-def computeLossNoMatchability(network, I, indexRoll, grid, maskMargin, args, ssim):
+def computeLossNoMatchability(network, I, indexRoll, grid, maskMargin, args, SSIM):
     
     f = F.normalize(network['netFeatCoarse'](I), p=2, dim=1) # feature extractor for source and target images
     corr = network['netCorr'](f[indexRoll], f)   # source -> target & target -> source !?
@@ -84,7 +84,7 @@ def computeLossNoMatchability(network, I, indexRoll, grid, maskMargin, args, ssi
 
     ## Reconstruction Loss 3 channels 
     IWarp = F.grid_sample(I, final)
-    lossLr =  ssim(IWarp, I[indexRoll], maskMargin)
+    lossLr =  SSIM(IWarp, I[indexRoll], args.margin)
         
     loss = lossLr  + args.mu_cycle * lossCycle 
 
@@ -164,7 +164,7 @@ def run(args) :
     maskMargin = F.pad(maskMargin, (args.margin, args.margin, args.margin, args.margin), "constant", 0)
     
     ## SSIM Loss
-    ssim =  ssimLoss.SSIM()
+    SSIM =  ssimLoss.ssim()
 
     ## create output directory
     if not os.path.exists(args.outDir) :
@@ -226,7 +226,7 @@ def run(args) :
                 sub_optimizer.zero_grad()
                        
              
-            lossLr, lossCycle, lossMatch, lossGrad, loss = LossFunction(network, I, indexRoll, grid, maskMargin, args, ssim)
+            lossLr, lossCycle, lossMatch, lossGrad, loss = LossFunction(network, I, indexRoll, grid, maskMargin, args, SSIM)
             loss.backward()
             
             # update weights
