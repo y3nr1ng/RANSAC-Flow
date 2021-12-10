@@ -21,6 +21,8 @@ dependencies:
   - scikit-image
   - pip:
     # use pip to avoid install cudatoolkit from conda
+    - kornia
+    - pytorch-lightning
     - torch
     - torchvision
     #- opencv-contrib-python-headless
