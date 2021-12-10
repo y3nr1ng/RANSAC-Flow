@@ -1,5 +1,4 @@
 import io
-import os
 import zipfile
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, List, Optional, Tuple
@@ -138,6 +137,3 @@ class ZippedImageFolder(ImageFolder):
             target = self.target_transform(target)
 
         return sample, target
-
-    def __len__(self):
-        return len(self.samples)
