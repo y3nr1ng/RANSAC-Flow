@@ -193,17 +193,6 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         return (src_path, src_feat), (tgt_path, tgt_feat), affine_mat
 
 
-class MegaDepthTestingDataset(ZippedImageFolder):
-    def __init__(self, root: Path, directory: Optional[Path] = "/", *args, **kwargs):
-        # pass images directory to super
-        super().__init__(root, directory / "images", *args, **kwargs)
-
-        # TODO reuse MegaDepthValidationDataset, but ignore ground truth affine matrix
-
-    def __getitem__(self, index: int) -> Tuple[Any, Any]:
-        return super().__getitem__(index)
-
-
 class MegaDepthDataModule(pl.LightningDataModule):
     """[summary]
 
