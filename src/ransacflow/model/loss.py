@@ -6,7 +6,7 @@ from kornia.losses import ssim_loss
 
 
 class MaskedSSIMLoss(nn.Module):
-    def __init__(self, window_size: int):
+    def __init__(self, window_size: int, margin: int):
         super().__init__()
         self.window_size = window_size
         # TODO create margin and mask the input
