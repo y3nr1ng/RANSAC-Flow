@@ -7,10 +7,11 @@ __all__ = ["RANSACFlowModel"]
 
 class RANSACFlowModel(pl.LightningModule):
     def __init__(self):
-        pass
+        super().__init__()
 
-    def configure_optimizers(self):
-        pass
+        # TODO create all 4 models
+
+        # TODO how to load weights (in later stages?)
 
     def training_step(self, batch, batch_idx):
         pass
@@ -18,3 +19,21 @@ class RANSACFlowModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         pass
 
+
+class RANSACFlowModelStage1(RANSACFlowModel):
+    def configure_optimizers(self):
+        pass
+
+
+class RANSACFlowModelStage2(RANSACFlowModel):
+    def configure_optimizers(self):
+        pass
+
+
+class RANSACFlowModelStage3(RANSACFlowModel):
+    def configure_optimizers(self):
+        pass
+
+
+class RANSACFlowModelStage4(RANSACFlowModel):
+    pass
