@@ -18,3 +18,18 @@ class RANSACFlowModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         pass
 
+
+class RANSACFlowModelStage1(RANSACFlowModel):
+    pass
+
+
+class RANSACFlowModelStage2(RANSACFlowModel):
+    pass
+
+
+class RANSACFlowModelStage3(RANSACFlowModel):
+    pass
+
+
+class RANSACFlowModelStage4(RANSACFlowModel):
+    pass

@@ -1,8 +1,8 @@
-from pathlib import WindowsPath
 import torch
 import torch.nn as nn
-from kornia.losses import ssim_loss
 import torchvision
+import torchvision.transforms as transforms
+from kornia.losses import ssim_loss
 
 
 class MaskedSSIMLoss(nn.Module):
@@ -41,7 +41,8 @@ class CycleConsistencyLoss(nn.Module):
 
 class PerceptualLoss(nn.Module):
     """
-    A type of content loss introduced in the Perceptual Losses for Real-Time Style Transfer and Super-Resolution super-resolution and style transfer framework.
+    A type of content loss introduced in the "Perceptual Losses for Real-Time Style
+    "Transfer and Super-Resolution framework.
 
     In this implementatoin, the perceptual loss is based on the ReLU activation layers
     of a pre-trained 16 layer VGG network.
@@ -74,17 +75,13 @@ class PerceptualLoss(nn.Module):
         # we don't need forward, but we do want to keep track of parameters
         self.blocks = nn.ModuleList(blocks)
 
-        self.register_buffer(
-            "mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        )
-        self.register_buffer(
-            "std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        self.normalize = (
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         )
 
     def forward(self, sample, target, feature_layers=(0, 1, 2, 3)):
-        # TODO reshape input to BCHW
-
-        # TODO normalize
+        sample = self.normalize(sample)
+        target = self.normalize(target)
 
         loss = 0
         x, y = sample, target
