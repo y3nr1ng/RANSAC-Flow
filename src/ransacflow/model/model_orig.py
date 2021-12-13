@@ -98,11 +98,9 @@ class FeatureExtractor(nn.Module):
         for i in range(1, num_block):
             layers.append(block(self.inplanes, planes, 1, None))
 
-        return nn.Sequential(*layers)
-        
-    
-        
-    def do_forward(self, x) : 
+        return nn.Sequential(*layers)   
+                    
+    def forward(self, x):
         
         x = self.conv1(x)
         x = self.bn1(x)
@@ -111,16 +109,6 @@ class FeatureExtractor(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x) 
-        return x       
-                    
-    def forward(self, x):
-        
-        if self.training : 
-            x = self.do_forward(x)
-        else : ## if it is evaluation mode, switch to no grad, to accelerate 
-            with torch.no_grad() : 
-                x = self.do_forward(x)
-        
         return x
 
 
@@ -132,9 +120,8 @@ class CorrNeigh(nn.Module):
         self.kernelSize = kernelSize
         self.paddingSize = kernelSize // 2
         self.padding = torch.nn.ZeroPad2d(self.paddingSize) 
-        
     
-    def do_forward(self, x, y):
+    def forward(self, x, y):
         
         ## x, y should be normalized
         w, h = x.size()[2:]
@@ -144,17 +131,6 @@ class CorrNeigh(nn.Module):
         for i,j in product(range(self.kernelSize), range(self.kernelSize)) : 
             coef.append( torch.sum(x * y.narrow(2, i, w).narrow(3, j, h), dim=1, keepdim=True) )   # after sum: size = (n , 1 , w , h)
         coef = torch.cat(coef, dim=1) # size (n, kernelSize**2, w, h)
-        
-        return coef
-    
-    def forward(self, x, y):
-        
-        if self.training : 
-            coef = self.do_forward(x, y)
-        
-        else : ## if it is evaluation mode, switch to no grad, to accelerate 
-            with torch.no_grad() : 
-                coef = self.do_forward(x, y)
         
         return coef
 
@@ -208,12 +184,12 @@ class NetFlow(nn.Module):
         ## make the initial matchability to 0.5 
         if self.network == 'netMatch':
             nn.init.normal_(self.conv4.weight, mean=0.0, std=0.0001)
-
         
-    def do_forward(self, coef, up8X):
+    def forward(self, x, up8X=True):
+        
         ## x, y should be normalized
-        n, c, w, h = coef.size()
-        x = self.conv1(coef)
+        n, c, w, h = x.size()
+        x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         
@@ -241,19 +217,6 @@ class NetFlow(nn.Module):
         
         x = F.upsample_bilinear(x, size=None, scale_factor=8) if up8X else x
         return x
-        
-        
-    def forward(self, x, up8X=True):
-        
-        if self.training : 
-            y = self.do_forward(x, up8X)
-        
-        else : ## if it is evaluation mode, switch to no grad, to accelerate 
-            with torch.no_grad() : 
-                y = self.do_forward(x, up8X)
-        
-        
-        return y
 
 
 ## Take the central part to estimate pixel transformation
