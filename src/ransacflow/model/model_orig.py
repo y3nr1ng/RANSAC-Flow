@@ -188,8 +188,8 @@ class NetFlow(nn.Module):
     def forward(self, x, up8X=True):
         
         ## x, y should be normalized
-        n, c, w, h = coef.size()
-        x = self.conv1(coef)
+        n, c, w, h = x.size()
+        x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         
