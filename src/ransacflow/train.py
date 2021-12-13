@@ -1,8 +1,7 @@
 import itertools
 
-import torch
-
 import pytorch_lightning as pl
+import torch
 from kornia.geometry.ransac import RANSAC
 from pytorch_lightning import Trainer
 
@@ -17,11 +16,16 @@ __all__ = [
 
 
 class RANSACFlowModel(pl.LightningModule):
-    def __init__(self, kernel_size: int, lr: float):
-        super().__init__()
+    """
+    Args:
+        alpha (float): Weight for matchability loss.
+        beta (float): Weight for cycle consistency loss.
+        kernel_size (int): TBD
+        lr (float): Learning rate.
+    """
 
-        self.lr = lr
-        self.kernel_size = kernel_size
+    def __init__(self, alpha: float, beta: float, kernel_size: int, lr: float):
+        super().__init__()
 
         # FIXME consolidate NetFlow
         # FIXME CorrNeight probably does not have learnable parameter, look this up
@@ -31,6 +35,10 @@ class RANSACFlowModel(pl.LightningModule):
         self.fine_flow = NetFlow(kernel_size, "netMatch")
 
         # TODO how to load weights (in later stages?)
+
+        # save everything passes to __init__ as hyperparameters, self.hparams
+        # https://pytorch-lightning.readthedocs.io/en/latest/common/hyperparameters.html
+        self.save_hyperparameters()
 
     def training_step(self, batch, batch_idx):
         pass
@@ -47,12 +55,14 @@ class RANSACFlowModelStage1(RANSACFlowModel):
             self.coarse_flow.parameters(),
         )
         coarse_flow_opt = torch.optim.Adam(
-            coarse_flow_params, lr=self.lr, betas=(0.5, 0.999)
+            coarse_flow_params, lr=self.hparams.lr, betas=(0.5, 0.999)
         )
         return coarse_flow_opt
 
     def training_step(self, batch, batch_idx):
         pass
+
+        # computeLossNoMatchability
 
 
 class RANSACFlowModelStage2(RANSACFlowModel):
@@ -61,6 +71,8 @@ class RANSACFlowModelStage2(RANSACFlowModel):
 
     def training_step(self, batch, batch_idx):
         pass
+
+        # computeLossNoMatchability
 
 
 class RANSACFlowModelStage3(RANSACFlowModel):
@@ -72,7 +84,7 @@ class RANSACFlowModelStage3(RANSACFlowModel):
             self.coarse_flow.parameters(),
         )
         coarse_flow_opt = torch.optim.Adam(
-            coarse_flow_params, lr=self.lr, betas=(0.5, 0.999)
+            coarse_flow_params, lr=self.hparams.lr, betas=(0.5, 0.999)
         )
 
         fine_flow_opt = torch.optim.Adam(
@@ -84,15 +96,18 @@ class RANSACFlowModelStage3(RANSACFlowModel):
     def training_step(self, batch, batch_idx):
         pass
 
+        # computeLossMatchability
+
 
 class RANSACFlowModelStage4(RANSACFlowModel):
     def configure_optimizers(self):
         """For better visual results, smooth the flow to reduce distortions. """
         coarse_flow_opt = torch.optim.Adam(
-            self.coarse_flow.parameters(), lr=self.lr, betas=(0.5, 0.999)
+            self.coarse_flow.parameters(), lr=self.hparams.lr, betas=(0.5, 0.999)
         )
         return coarse_flow_opt
 
     def training_step(self, batch, batch_idx):
         pass
 
+        # computeLossMatchability
