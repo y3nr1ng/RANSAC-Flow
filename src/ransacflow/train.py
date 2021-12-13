@@ -20,11 +20,14 @@ class RANSACFlowModel(pl.LightningModule):
     Args:
         alpha (float): Weight for matchability loss.
         beta (float): Weight for cycle consistency loss.
-        kernel_size (int): TBD
+        gamma (float): Weight for the gradient. FIXME what the fuck is this? stage4?
+        kernel_size (int): FIXME TBD
         lr (float): Learning rate.
     """
 
-    def __init__(self, alpha: float, beta: float, kernel_size: int, lr: float):
+    def __init__(
+        self, alpha: float, beta: float, gamma: float, kernel_size: int, lr: float
+    ):
         super().__init__()
 
         # FIXME consolidate NetFlow
@@ -78,6 +81,7 @@ class RANSACFlowModelStage2(RANSACFlowModel):
 class RANSACFlowModelStage3(RANSACFlowModel):
     def configure_optimizers(self):
         """Jointly train the coarse and fine flow network."""
+        # coarse flow and its optimizer
         coarse_flow_params = itertools.chain(
             self.feature_extractor.parameters(),
             self.correlator.parameters(),
@@ -87,6 +91,7 @@ class RANSACFlowModelStage3(RANSACFlowModel):
             coarse_flow_params, lr=self.hparams.lr, betas=(0.5, 0.999)
         )
 
+        # fine flow and its optimizer (we only have 1 network)
         fine_flow_opt = torch.optim.Adam(
             self.fine_flow.parameters(), lr=self.lr, betas=(0.5, 0.999)
         )
