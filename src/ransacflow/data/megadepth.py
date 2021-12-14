@@ -2,15 +2,15 @@ import io
 import logging
 import pickle
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from numpy.random.mtrand import shuffle
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-from torchvision.datasets.folder import has_file_allowed_extension
+from torchvision.transforms import Compose
 
+from . import transform
 from .dataset import ZippedImageFolder
 
 __all__ = ["MegaDepthDataModule"]
@@ -22,6 +22,9 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._rng = np.random.default_rng()
+
+        if self.target_transform is not None:
+            logger.warning("target_transform is not used")
 
     @staticmethod
     def make_dataset(
@@ -48,17 +51,30 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
             target_dir = directory / target_class
 
             # we know each training set has 3 images, hard coded it to load them
-            for i in range(3):
-                file = target_dir / f"{i+1}.jpg"
-                item = file, class_index
-                instances.append(item)
+            files = [target_dir / f"{i+1}.jpg" for i in range(3)]
+            item = files, class_index
+            instances.append(item)
 
         return instances
 
     def __getitem__(self, index: int):
         # we need 2 images, randomly choose from [i+0]-[i+2] (3 images)
+        files, _ = self.samples[index]
         offsets = self._rng.choice(3, size=2)
-        image_pair = tuple(super().__getitem__(index + offset) for offset in offsets)
+
+        # we cannot use parent __getitem__ since transformations will be off
+        image_pair = []
+        for offset in offsets:
+            path = files[offset]
+
+            fp = io.BytesIO(path.read_bytes())
+            image = self.loader(fp)
+            image_pair.append(image)
+        image_pair = tuple(image_pair)
+
+        if self.transform is not None:
+            image_pair = self.transform(image_pair)
+
         return image_pair
 
     def __len__(self) -> int:
@@ -190,7 +206,9 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         if self.target_transform is not None:
             tgt_image, tgt_feat = self.target_transform(tgt_image, tgt_feat)
 
-        return (src_path, src_feat), (tgt_path, tgt_feat), affine_mat
+        logger.warning(f"validation.__getitem__")
+
+        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
 
 
 class MegaDepthDataModule(pl.LightningDataModule):
@@ -201,25 +219,35 @@ class MegaDepthDataModule(pl.LightningDataModule):
         batch_size (int, optional): How many samples per batch to load.
     """
 
-    def __init__(self, path: Path, batch_size: int = 16):
+    def __init__(
+        self, path: Path, size: Optional[Union[int, tuple]] = 224, batch_size: int = 16
+    ):
         super().__init__()
 
         self.path = path
+        self.size = size
         self.batch_size = batch_size
 
-    def setup(self):
-        self.megadepth_train = MegaDepthTrainingDataset(self.path, "train")
-        self.megadepth_val = MegaDepthValidationDataset(self.path, "validate")
+    def setup(self, stage: Optional[str] = None):
+        # training set requires some transformations
+        transforms = Compose(
+            [
+                transform.ToTensorImagePair(),
+                transform.RandomCropImagePair(self.size),
+                transform.RandomHorizontalFlipImagePair(),
+            ]
+        )
+        self.megadepth_train = MegaDepthTrainingDataset(
+            self.path, directory="train", transform=transforms
+        )
+
+        self.megadepth_val = MegaDepthValidationDataset(self.path, directory="validate")
+
+    def teardown(self, stage: Optional[str] = None):
+        # FIXME these datasets are zipped folder, close them for safety
+        pass
 
     def train_dataloader(self):
-        """
-        root: Path,
-        directory: Optional[Path] = "/",
-        transform: Optional[Callable] = None,
-        target_transform: Optional[Callable] = None,
-        loader: Callable[[BinaryIO], Any] = default_loader,
-        is_valid_file: Optional[Callable[[str], bool]] = None,
-        """
         megadepth_train = torch.utils.data.DataLoader(
             self.megadepth_train,
             batch_size=self.batch_size,
@@ -229,11 +257,10 @@ class MegaDepthDataModule(pl.LightningDataModule):
         return megadepth_train
 
     def val_dataloader(self):
-        # TODO should we drop_last for validation?
+        # FIXME follow https://pytorch.org/docs/stable/data.html, SimpleCustomBatch to resume using batches
         megadepth_val = torch.utils.data.DataLoader(
             self.megadepth_val,
-            batch_size=self.batch_size,
+            batch_size=None,  # disable automatic batching
             shuffle=False,
-            drop_last=True,
         )
         return megadepth_val
