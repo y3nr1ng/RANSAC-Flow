@@ -64,7 +64,6 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
 
         # we cannot use parent __getitem__ since transformations will be off
         image_pair = []
-        print(f"train[{index}]")
         for offset in offsets:
             path = files[offset]
 
@@ -72,9 +71,6 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
             image = self.loader(fp)
             image_pair.append(image)
         image_pair = tuple(image_pair)
-        print(
-            f"[{offsets[0]}].shape={image_pair[0].shape}, [{offsets[1]}].shape={image_pair[1].shape}"
-        )
 
         if self.transform is not None:
             image_pair = self.transform(image_pair)
@@ -261,6 +257,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
         return megadepth_train
 
     def val_dataloader(self):
+        # FIXME follow https://pytorch.org/docs/stable/data.html, SimpleCustomBatch to resume using batches
         megadepth_val = torch.utils.data.DataLoader(
             self.megadepth_val,
             batch_size=None,  # disable automatic batching
