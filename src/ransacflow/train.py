@@ -34,6 +34,7 @@ class RANSACFlowModel(pl.LightningModule):
         # FIXME CorrNeight probably does not have learnable parameter, look this up
         self.feature_extractor = FeatureExtractor()
         self.correlator = CorrNeigh(kernel_size)
+        # FIXME separate these networks, and use inheritance to prevent confusion
         self.coarse_flow = NetFlow(kernel_size, "netFlowCoarse")
         self.fine_flow = NetFlow(kernel_size, "netMatch")
 
@@ -44,7 +45,16 @@ class RANSACFlowModel(pl.LightningModule):
         self.save_hyperparameters()
 
     def training_step(self, batch, batch_idx):
-        pass
+        # extract feature correlation map
+        print(len(batch))
+
+        raise RuntimeError('DEBUG')
+
+        # coarse flow prediction
+
+        # fine flow prediction
+
+        # calculate losses
 
     def validation_step(self, batch, batch_idx):
         pass
@@ -93,7 +103,7 @@ class RANSACFlowModelStage3(RANSACFlowModel):
 
         # fine flow and its optimizer (we only have 1 network)
         fine_flow_opt = torch.optim.Adam(
-            self.fine_flow.parameters(), lr=self.lr, betas=(0.5, 0.999)
+            self.fine_flow.parameters(), lr=self.hparams.lr, betas=(0.5, 0.999)
         )
 
         return (coarse_flow_opt, fine_flow_opt)
