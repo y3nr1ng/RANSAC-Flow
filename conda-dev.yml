@@ -21,6 +21,7 @@ dependencies:
   - scikit-image
   - pip:
     # use pip to avoid install cudatoolkit from conda
+    - antialiased_cnns
     - kornia
     - pytorch-lightning
     - torch
