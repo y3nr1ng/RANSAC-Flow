@@ -216,6 +216,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
 
     Args:
         path (Path): Path to the ZIP file.
+        size (int or tuple of int, optional): Crop input image to this size.
         batch_size (int, optional): How many samples per batch to load.
     """
 
