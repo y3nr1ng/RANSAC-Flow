@@ -15,7 +15,7 @@ class FeatureExtractor(nn.Module):
     def __init__(self, pretrained: bool = True):
         super().__init__()
 
-        resnet = antialiased_cnns.resnet18(pretrained=True)
+        resnet = antialiased_cnns.resnet18(pretrained=pretrained)
 
         # the original work replace the first conv layer with
         #   - smaller kernel
