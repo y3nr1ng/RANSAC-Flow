@@ -6,30 +6,13 @@ import torchvision.transforms as transforms
 from kornia.losses import ssim_loss
 
 
-class MaskedSSIMLoss(nn.Module):
-    def __init__(self, window_size: int, margin: int):
-        super().__init__()
-        self.window_size = window_size
-        self.margin = margin
-        # TODO create margin and mask the input
+class ReconstructionLoss(nn.Module):
+    # FIXME merge SSIM here, the original paper use (1-SSIM) as the loss
+    def __init__(self):
+        pass
 
-    def masked_image(img, margin):
-        b = margin # border size in pixel
-        ny, nx = img.shape[0], img.shape[1]
-
-        # FIXME we should use the torch version of these functions, otherwise, they won't get moved to GPU automatically
-        if img.ndim == 3:
-            mask = np.zeros((ny, nx, img.shape[2]))
-        elif img.ndim == 2:
-            mask = np.zeros((ny, nx))
-        mask[b:-b, b:-b] = img[b:-b, b:-b]
-
-        return mask
-
-    def forward(self, img1: torch.Tensor, img2: torch.Tensor) -> torch.Tensor:
-        img1 = masked_img(img1)
-        img1 = masked_img(img1)
-        return ssim_loss(img1, img2, window_size=self.window_size)
+    def forward(self):
+        pass
 
 
 class MatchabilityLoss(nn.Module):
@@ -40,28 +23,12 @@ class MatchabilityLoss(nn.Module):
         pass
 
 
-class ReconstructionLoss(nn.Module):
-    # FIXME merge SSIM here, the original paper use (1-SSIM) as the loss
+class CycleConsistencyLoss(nn.Module):
     def __init__(self):
         pass
 
     def forward(self):
         pass
-
-
-class CycleConsistencyLoss(nn.Module):
-    def __init__(self):
-        super().__init__(self, margin: int)
-        self.margin = margin
-        pass
-
-    def forward(self, flowC, grid, matchCycle):
-
-        x, y = flowC, grid
-        loss = torch.mean(torch.abs(x - y), dim=3).unsqueeze(1)
-        loss = torch.sum(lossCycle * margin) / (torch.sum(margin) + 0.001)
-
-        return loss
 
 
 class PerceptualLoss(nn.Module):
