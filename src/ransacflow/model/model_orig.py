@@ -11,10 +11,6 @@ def conv3x3(in_features, out_features, stride=1):
         in_features, out_features, kernel_size=3, stride=stride, padding=1, bias=False
     )
 
-
-# compare features in square neighborhood
-
-
 # Net of flow and matchability
 class NetFlow(nn.Module):
     def __init__(self, kernelSize, network):
