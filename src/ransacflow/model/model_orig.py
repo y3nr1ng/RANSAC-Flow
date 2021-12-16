@@ -1,4 +1,3 @@
-import sys
 from itertools import product
 
 import torch
@@ -11,32 +10,6 @@ def conv3x3(in_features, out_features, stride=1):
     return nn.Conv2d(
         in_features, out_features, kernel_size=3, stride=stride, padding=1, bias=False
     )
-
-
-# compare features in square neighborhood
-class CorrNeigh(nn.Module):
-    def __init__(self, kernelSize):
-        super(CorrNeigh, self).__init__()
-        assert kernelSize % 2 == 1
-        self.kernelSize = kernelSize
-        self.paddingSize = kernelSize // 2
-        self.padding = torch.nn.ZeroPad2d(self.paddingSize)
-
-    def forward(self, x, y):
-
-        ## x, y should be normalized
-        w, h = x.size()[2:]
-        coef = []
-        y = self.padding(y)
-        ## coef is the feature similarity between (i,j) and (i-r, j-r) with -kernel < r < +kernel
-        for i, j in product(range(self.kernelSize), range(self.kernelSize)):
-            coef.append(
-                torch.sum(x * y.narrow(2, i, w).narrow(3, j, h), dim=1, keepdim=True)
-            )  # after sum: size = (n , 1 , w , h)
-        coef = torch.cat(coef, dim=1)  # size (n, kernelSize**2, w, h)
-
-        return coef
-
 
 # Net of flow and matchability
 class NetFlow(nn.Module):
@@ -83,15 +56,9 @@ class NetFlow(nn.Module):
         elif self.network == "netMatch":
             self.conv4 = conv3x3(128, 1)
 
-<<<<<<< HEAD
-        if self.network == 'netFlowCoarse':
-            self.softmax = torch.nn.Softmax(dim=1)
-        elif self.network == 'netMatch':
-=======
         if self.network == "netFlowCoarse":
             self.softmax = torch.nn.Softmax(dim=1)
         elif self.network == "netMatch":
->>>>>>> dev-work-featureExtractor
             self.sigmoid = torch.nn.Sigmoid()
 
         for m in self.modules():
