@@ -5,7 +5,12 @@ import torch
 from kornia.geometry.ransac import RANSAC
 from pytorch_lightning import Trainer
 
-from .model import CorrNeigh, FeatureExtractor, NetFlow
+from .model import (
+    FeatureExtractor,
+    NeighborCorrelator,
+    FlowPredictor,
+    MatchabilityPredictor,
+)
 
 __all__ = [
     "RANSACFlowModelStage1",
@@ -21,24 +26,32 @@ class RANSACFlowModel(pl.LightningModule):
         alpha (float): Weight for matchability loss.
         beta (float): Weight for cycle consistency loss.
         gamma (float): Weight for the gradient. FIXME what the fuck is this? stage4?
-        kernel_size (int): FIXME TBD
+        image_size (int): FIXME TBD, we assume it is square
+        kernel_size (int): FIXME TBD, we assume it is square
         lr (float): Learning rate.
     """
 
     def __init__(
-        self, alpha: float, beta: float, gamma: float, kernel_size: int, lr: float
+        self,
+        alpha: float,
+        beta: float,
+        gamma: float,
+        image_size: int,
+        kernel_size: int,
+        lr: float,
+        pretrained: bool = True,
     ):
         super().__init__()
 
-        # FIXME consolidate NetFlow
-        # FIXME CorrNeight probably does not have learnable parameter, look this up
-        self.feature_extractor = FeatureExtractor()
-        self.correlator = CorrNeigh(kernel_size)
-        # FIXME separate these networks, and use inheritance to prevent confusion
-        self.coarse_flow = NetFlow(kernel_size, "netFlowCoarse")
-        self.fine_flow = NetFlow(kernel_size, "netMatch")
+        # FIXME NeighborCorrelator does not have learnable parameter, look this up
+        self.feature_extractor = FeatureExtractor(pretrained=pretrained)
+        self.correlator = NeighborCorrelator(kernel_size)
+        self.flow = FlowPredictor(image_size, kernel_size)
+        self.matchability = MatchabilityPredictor(image_size, kernel_size)
 
-        # TODO how to load weights (in later stages?)
+        # FIXME how to load weights (in later stages?)
+
+        # FIXME set non-trainalbe network to eval()
 
         # save everything passes to __init__ as hyperparameters, self.hparams
         # https://pytorch-lightning.readthedocs.io/en/latest/common/hyperparameters.html
@@ -48,7 +61,7 @@ class RANSACFlowModel(pl.LightningModule):
         # extract feature correlation map
         print(len(batch))
 
-        raise RuntimeError('DEBUG')
+        raise RuntimeError("DEBUG")
 
         # coarse flow prediction
 
@@ -63,9 +76,7 @@ class RANSACFlowModel(pl.LightningModule):
 class RANSACFlowModelStage1(RANSACFlowModel):
     def configure_optimizers(self):
         coarse_flow_params = itertools.chain(
-            self.feature_extractor.parameters(),
-            self.correlator.parameters(),
-            self.coarse_flow.parameters(),
+            self.feature_extractor.parameters(), self.flow.parameters(),
         )
         coarse_flow_opt = torch.optim.Adam(
             coarse_flow_params, lr=self.hparams.lr, betas=(0.5, 0.999)
@@ -93,9 +104,7 @@ class RANSACFlowModelStage3(RANSACFlowModel):
         """Jointly train the coarse and fine flow network."""
         # coarse flow and its optimizer
         coarse_flow_params = itertools.chain(
-            self.feature_extractor.parameters(),
-            self.correlator.parameters(),
-            self.coarse_flow.parameters(),
+            self.feature_extractor.parameters(), self.flow.parameters(),
         )
         coarse_flow_opt = torch.optim.Adam(
             coarse_flow_params, lr=self.hparams.lr, betas=(0.5, 0.999)
@@ -103,7 +112,7 @@ class RANSACFlowModelStage3(RANSACFlowModel):
 
         # fine flow and its optimizer (we only have 1 network)
         fine_flow_opt = torch.optim.Adam(
-            self.fine_flow.parameters(), lr=self.hparams.lr, betas=(0.5, 0.999)
+            self.matchability.parameters(), lr=self.hparams.lr, betas=(0.5, 0.999)
         )
 
         return (coarse_flow_opt, fine_flow_opt)
@@ -118,7 +127,7 @@ class RANSACFlowModelStage4(RANSACFlowModel):
     def configure_optimizers(self):
         """For better visual results, smooth the flow to reduce distortions. """
         coarse_flow_opt = torch.optim.Adam(
-            self.coarse_flow.parameters(), lr=self.hparams.lr, betas=(0.5, 0.999)
+            self.flow.parameters(), lr=self.hparams.lr, betas=(0.5, 0.999)
         )
         return coarse_flow_opt
 
