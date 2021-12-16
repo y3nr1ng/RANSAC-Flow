@@ -1,5 +1,6 @@
 from typing import Tuple, Union
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -85,6 +86,21 @@ class FlowPredictor(BaseFlowPredictor):
 
         self.softmax = nn.Softmax(dim=1)
 
+        # generate the for local coordinate [-K//2, K//2]
+        ks = torch.arange(0, self.kernel_size) - self.kernel_size // 2
+        grid_x, grid_y = torch.meshgrid(ks, ks, indexing="xy")
+        # scale the shift (grid) vector(s) so that it is proportional to the image size
+        # NOTE
+        #   expand() in meshgrid() only creates new view, need explicit assignment to
+        #   allocate the full memory
+        ny, nx = self.image_size
+        grid_x = grid_x / (nx / 2.0)
+        grid_y = grid_y / (ny / 2.0)
+
+        # save these grid coordinates, and flatten it along the way
+        self.register_buffer("grid_x", grid_x.view(1, -1, 1, 1))
+        self.register_buffer("grid_y", grid_y.view(1, -1, 1, 1))
+
     def _forward(self, x):
         x = super()._forward(x)
 
@@ -92,7 +108,10 @@ class FlowPredictor(BaseFlowPredictor):
         x = self.softmax(x)
 
         # transform x from patches of local coordinate shifts, into global coordinate
-
+        flow_x = torch.tensordot(x, self.grid_x, dims=1)
+        flow_y = torch.tensordot(x, self.grid_y, dims=1)
+        # combine both flow to yield the final output
+        x = torch.cat([flow_x, flow_y], dim=1)
 
         return x
 
