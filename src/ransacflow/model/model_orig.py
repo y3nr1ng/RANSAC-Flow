@@ -34,7 +34,7 @@ class NetFlow(nn.Module):
         self.network = network  # network type: netFlowCoarse or netMatch
 
         if self.network == "netFlowCoarse":
-            self.conv4 = conv3x3(128, kernelSize * kernellSize)
+            self.conv4 = conv3x3(128, kernelSize * kernelSize)
             self.gridY = (
                 torch.arange(-self.paddingSize, self.paddingSize + 1)
                 .view(1, 1, -1, 1)

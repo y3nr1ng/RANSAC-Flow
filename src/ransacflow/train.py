@@ -51,6 +51,8 @@ class RANSACFlowModel(pl.LightningModule):
 
         # FIXME how to load weights (in later stages?)
 
+        # FIXME set non-trainalbe network to eval()
+
         # save everything passes to __init__ as hyperparameters, self.hparams
         # https://pytorch-lightning.readthedocs.io/en/latest/common/hyperparameters.html
         self.save_hyperparameters()

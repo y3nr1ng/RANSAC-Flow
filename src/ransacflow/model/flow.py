@@ -37,6 +37,8 @@ class BaseFlowPredictor(nn.Module):
         assert kernel_size % 2 == 1, "kernel size has to be odd"
         self.kernel_size = kernel_size
 
+        self.relu = nn.ReLU(inplace=True)
+
         self.conv1 = conv2d_3x3(kernel_size * kernel_size, 512)
         self.bn1 = nn.BatchNorm2d(512)
 
@@ -48,6 +50,7 @@ class BaseFlowPredictor(nn.Module):
 
     def forward(self, x):
         x = self._forward(x)
+        print(f"x.shape={x.shape}")
 
         # since all child class will need upsample later on, we do it here
         x = F.interpolate(x, size=self.image_size, mode="bilinear")
@@ -57,15 +60,15 @@ class BaseFlowPredictor(nn.Module):
     def _forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
-        x = F.relu(x, inplace=True)
+        x = self.relu(x)
 
         x = self.conv2(x)
         x = self.bn2(x)
-        x = F.relu(x, inplace=True)
+        x = self.relu(x)
 
         x = self.conv3(x)
         x = self.bn3(x)
-        x = F.relu(x, inplace=True)
+        x = self.relu(x)
 
         return x
 
@@ -98,8 +101,8 @@ class FlowPredictor(BaseFlowPredictor):
         grid_y = grid_y / (ny / 2.0)
 
         # save these grid coordinates, and flatten it along the way
-        self.register_buffer("grid_x", grid_x.view(1, -1, 1, 1))
-        self.register_buffer("grid_y", grid_y.view(1, -1, 1, 1))
+        self.register_buffer("grid_x", grid_x.view(1, -1, 1, 1), persistent=False)
+        self.register_buffer("grid_y", grid_y.view(1, -1, 1, 1), persistent=False)
 
     def _forward(self, x):
         x = super()._forward(x)
@@ -108,8 +111,8 @@ class FlowPredictor(BaseFlowPredictor):
         x = self.softmax(x)
 
         # transform x from patches of local coordinate shifts, into global coordinate
-        flow_x = torch.tensordot(x, self.grid_x, dims=1)
-        flow_y = torch.tensordot(x, self.grid_y, dims=1)
+        flow_x = torch.sum(x * self.grid_x, dim=1, keepdim=True)
+        flow_y = torch.sum(x * self.grid_y, dim=1, keepdim=True)
         # combine both flow to yield the final output
         x = torch.cat([flow_x, flow_y], dim=1)
 
@@ -132,8 +135,8 @@ class MatchabilityPredictor(BaseFlowPredictor):
 
         self.sigmoid = nn.Sigmoid()
 
-    def _forward(self):
-        x = super()._formward()
+    def _forward(self, x):
+        x = super()._forward(x)
 
         x = self.conv4(x)
         x = self.sigmoid(x)
