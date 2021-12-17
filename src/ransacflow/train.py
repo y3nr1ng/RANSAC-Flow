@@ -3,6 +3,7 @@ import logging
 
 import pytorch_lightning as pl
 import torch
+from torch._C import device
 import torch.nn.functional as F
 
 from .model import (
@@ -63,8 +64,10 @@ class RANSACFlowModel(pl.LightningModule):
 
         # FIXME set non-trainalbe network to eval()
 
-        # grid cache, to avoid regenerate this during training
-        self.register_buffer("grid", None)
+        # scaling parameters and grids used during flow generation
+        self.image_size = (-1, -1)
+        self.register_buffer("scale", torch.tensor([]), persistent=False)
+        self.register_buffer("grid", torch.tensor([]), persistent=False)
 
         # save everything passes to __init__ as hyperparameters, self.hparams
         # https://pytorch-lightning.readthedocs.io/en/latest/common/hyperparameters.html
@@ -81,7 +84,22 @@ class RANSACFlowModel(pl.LightningModule):
         assert (
             I_s.shape == I_t.shape
         ), f"images have different shapes, {I_s.shape} and {I_t.shape}"
-        image_size = I_s.shape[-2:]
+        if self.image_size != I_s.shape[-2:]:
+            self.image_size = I_s.shape[-2:]
+
+            # scale flow vectors
+            scale = torch.tensor(self.image_size[::-1], device=self.scale.device)
+            scale = scale / 2.0
+            self.scale = scale.view(1, -1, 1, 1)
+
+            # recreate grid
+            logger.debug(f"create new grid {self.image_size}")
+            ny, nx = self.image_size
+            vx = torch.linspace(-1, 1, nx, device=self.grid.device)
+            vy = torch.linspace(-1, 1, ny, device=self.grid.device)
+            grid_x, grid_y = torch.meshgrid(vx, vy, indexing="xy")
+            # NOTE F.grid_sample() expects grid dimension (B, H, W, 2)
+            self.grid = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0)
 
         # extract feature correlation map
         f_s = self.feature_extractor(I_s)
@@ -92,20 +110,11 @@ class RANSACFlowModel(pl.LightningModule):
 
         # estimate flow
         F_st = self.flow(s_st)
-        # upsample it back to original size, see BaseFlowPredictor
-        F_st = F.interpolate(F_st, size=image_size, mode="bilinear")
-        # rescale the flow so it is proportional to image size, see FlowPredictor
-        F_st /= torch.tensor(image_size[::-1]) / 2.0
-
-        # (re)generate the grid
-        if (self.grid is None) or (image_size != self.grid.shape[:-1]):
-            logger.debug(f"create new grid {image_size}")
-            ny, nx = image_size
-            vx = torch.linspace(-1, 1, nx)
-            vy = torch.linspace(-1, 1, ny)
-            grid_x, grid_y = torch.meshgrid(vx, vy, indexing="xy")
-            # NOTE F.grid_sample() expects grid dimension (B, H, W, 2)
-            self.grid = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0)
+        # upsample it back to original size, see `BaseFlowPredictor`
+        F_st = F.interpolate(F_st, size=tuple(self.image_size), mode="bilinear")
+        # rescale the flow so it is proportional to image size, see `FlowPredictor`
+        # NOTE after going through different combination, direct division seems easiest
+        F_st /= self.scale
 
         # since flow is generally use as grid sampler, we permute its axes to follow the
         # convention uesd in F.grid_sample()
