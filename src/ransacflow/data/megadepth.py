@@ -237,7 +237,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
         transforms = Compose(
             [
                 transform.ToTensorImagePair(),
-                transform.RandomCropImagePair(self.size),
+                transform.RandomCropImagePair(self.image_size),
                 transform.RandomHorizontalFlipImagePair(),
             ]
         )

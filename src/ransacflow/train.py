@@ -114,9 +114,10 @@ class RANSACFlowModel(pl.LightningModule):
         return F_st
 
     def validation_step(self, batch, batch_idx):
-        # FIXME
+        # NOTE we don't really have a batch here, refer to commit 555371
+        (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = batch
 
-        raise RuntimeError('DEBUG, base, validation_step')
+        raise RuntimeError("DEBUG, base, validation_step")
 
 
 class RANSACFlowModelStage1(RANSACFlowModel):
