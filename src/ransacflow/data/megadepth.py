@@ -3,6 +3,7 @@ import logging
 import pickle
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing_extensions import runtime
 
 import numpy as np
 import pandas as pd
@@ -86,6 +87,9 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         # pass images directory to super
         directory = Path(directory)
         super().__init__(root, directory / "images", *args, **kwargs)
+
+        if self.target_transform is not None:
+            logger.warning("target_transform is not used")
 
     def find_classes(self, directory: Path) -> Tuple[List[str], Dict[str, int]]:
         """
@@ -201,14 +205,15 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         fp = io.BytesIO(tgt_path.read_bytes())
         tgt_image = self.loader(fp)
 
+        # pack them up
+        source = src_image, src_feat
+        target = tgt_image, tgt_feat
+        item = source, target, affine_mat
+
         if self.transform is not None:
-            src_image, src_feat = self.transform(src_image, src_feat)
-        if self.target_transform is not None:
-            tgt_image, tgt_feat = self.target_transform(tgt_image, tgt_feat)
+            item = self.transform(item)
 
-        logger.warning(f"validation.__getitem__")
-
-        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
+        return item
 
 
 class MegaDepthDataModule(pl.LightningDataModule):
@@ -216,25 +221,29 @@ class MegaDepthDataModule(pl.LightningDataModule):
 
     Args:
         path (Path): Path to the ZIP file.
-        size (int or tuple of int, optional): Crop input image to this size.
-        batch_size (int, optional): How many samples per batch to load.
+        image_size (int or tuple of int, optional): Crop input image to this size.
+        train_batch_size (int, optional): Samples per batch to load during training.
+        val_batch_size (int, optional): Samples per batch during validation.
     """
 
     def __init__(
-        self, path: Path, size: Optional[Union[int, tuple]] = 224, batch_size: int = 16
+        self,
+        path: Path,
+        image_size: Optional[Union[int, tuple]] = 224,
+        train_batch_size: int = 16,
     ):
         super().__init__()
 
         self.path = path
-        self.size = size
-        self.batch_size = batch_size
+        self.image_size = image_size
+        self.train_batch_size = train_batch_size
 
     def setup(self, stage: Optional[str] = None):
         # training set requires some transformations
         transforms = Compose(
             [
                 transform.ToTensorImagePair(),
-                transform.RandomCropImagePair(self.size),
+                transform.RandomCropImagePair(self.image_size),
                 transform.RandomHorizontalFlipImagePair(),
             ]
         )
@@ -242,7 +251,11 @@ class MegaDepthDataModule(pl.LightningDataModule):
             self.path, directory="train", transform=transforms
         )
 
-        self.megadepth_val = MegaDepthValidationDataset(self.path, directory="validate")
+        self.megadepth_val = MegaDepthValidationDataset(
+            self.path,
+            directory="validate",
+            transform=transform.ToTensorValidationPair(),
+        )
 
     def teardown(self, stage: Optional[str] = None):
         # FIXME these datasets are zipped folder, close them for safety
@@ -251,17 +264,16 @@ class MegaDepthDataModule(pl.LightningDataModule):
     def train_dataloader(self):
         megadepth_train = torch.utils.data.DataLoader(
             self.megadepth_train,
-            batch_size=self.batch_size,
+            batch_size=self.train_batch_size,
             shuffle=True,
             drop_last=True,
         )
         return megadepth_train
 
     def val_dataloader(self):
-        # FIXME follow https://pytorch.org/docs/stable/data.html, SimpleCustomBatch to resume using batches
         megadepth_val = torch.utils.data.DataLoader(
             self.megadepth_val,
-            batch_size=None,  # disable automatic batching
+            batch_size=1,  # disable autmoatic batching
             shuffle=False,
         )
         return megadepth_val

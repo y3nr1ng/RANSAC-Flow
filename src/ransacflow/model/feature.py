@@ -66,7 +66,7 @@ class NeighborCorrelator(nn.Module):
         for i, j in itertools.product(range(self.kernel_size), range(self.kernel_size)):
             similarity.append(
                 # (B, 1, W, H)
-                torch.sum(x * y[..., i : i + w, j : j + h], dim=1, keepdim=True)
+                torch.sum(x * y[..., i : i + h, j : j + w], dim=1, keepdim=True)
             )
 
         # (B, K*K, W, H)
