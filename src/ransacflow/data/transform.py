@@ -5,8 +5,7 @@ input formats.
 import torch
 import torch.nn as nn
 import torchvision.transforms.functional as F
-from torchvision.transforms import RandomCrop, RandomHorizontalFlip, ToTensor
-from torchvision.transforms.functional_pil import affine
+from torchvision.transforms import RandomCrop, RandomHorizontalFlip, ToTensor, Resize
 
 
 class RandomCropImagePair(RandomCrop):
@@ -48,6 +47,20 @@ class RandomHorizontalFlipImagePair(RandomHorizontalFlip):
 class ToTensorImagePair(ToTensor):
     def __call__(self, im_pair):
         return F.to_tensor(im_pair[0]), F.to_tensor(im_pair[1])
+
+
+class ResizeValidationPair(Resize):
+    """
+
+    TODO resize images, src_image, tgt_image
+    TODO resize feature points, src_feat, tgt_feat
+
+    Args:
+        Resize ([type]): [description]
+    """
+
+    def forward(self, item):
+        pass
 
 
 class ToTensorValidationPair(ToTensor):
