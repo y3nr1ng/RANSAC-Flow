@@ -88,6 +88,9 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         directory = Path(directory)
         super().__init__(root, directory / "images", *args, **kwargs)
 
+        if self.target_transform is not None:
+            logger.warning("target_transform is not used")
+
     def find_classes(self, directory: Path) -> Tuple[List[str], Dict[str, int]]:
         """
         Find class folders in a dataset.
@@ -202,12 +205,15 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         fp = io.BytesIO(tgt_path.read_bytes())
         tgt_image = self.loader(fp)
 
-        if self.transform is not None:
-            src_image, src_feat = self.transform(src_image, src_feat)
-        if self.target_transform is not None:
-            tgt_image, tgt_feat = self.target_transform(tgt_image, tgt_feat)
+        # pack them up
+        source = src_image, src_feat
+        target = tgt_image, tgt_feat
+        item = source, target, affine_mat
 
-        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
+        if self.transform is not None:
+            item = self.transform(item)
+
+        return item
 
 
 class MegaDepthDataModule(pl.LightningDataModule):
@@ -224,7 +230,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
         self,
         path: Path,
         image_size: Optional[Union[int, tuple]] = 224,
-        train_batch_size: int = 16
+        train_batch_size: int = 16,
     ):
         super().__init__()
 
@@ -245,7 +251,11 @@ class MegaDepthDataModule(pl.LightningDataModule):
             self.path, directory="train", transform=transforms
         )
 
-        self.megadepth_val = MegaDepthValidationDataset(self.path, directory="validate")
+        self.megadepth_val = MegaDepthValidationDataset(
+            self.path,
+            directory="validate",
+            transform=transform.ToTensorValidationPair(),
+        )
 
     def teardown(self, stage: Optional[str] = None):
         # FIXME these datasets are zipped folder, close them for safety
@@ -263,7 +273,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
     def val_dataloader(self):
         megadepth_val = torch.utils.data.DataLoader(
             self.megadepth_val,
-            batch_size=None,  # disable autmoatic batching
+            batch_size=1,  # disable autmoatic batching
             shuffle=False,
         )
         return megadepth_val
