@@ -114,7 +114,9 @@ class RANSACFlowModel(pl.LightningModule):
         return F_st
 
     def validation_step(self, batch, batch_idx):
-        pass
+        # FIXME
+
+        raise RuntimeError('DEBUG, base, validation_step')
 
 
 class RANSACFlowModelStage1(RANSACFlowModel):
