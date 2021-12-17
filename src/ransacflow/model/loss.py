@@ -1,31 +1,54 @@
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as transforms
-from kornia.losses import ssim_loss
+from kornia.losses import SSIMLoss
+
+__all__ = [
+    "ReconstructionLoss",
+    "MatchabilityLoss",
+    "CycleConsistencyLoss",
+    "PerceptualLoss",
+]
 
 
 class ReconstructionLoss(nn.Module):
-    # FIXME merge SSIM here, the original paper use (1-SSIM) as the loss
-    def __init__(self):
-        pass
+    def __init__(self, window_size: int):
+        super().__init__()
 
-    def forward(self):
+        self.ssim_loss = SSIMLoss(window_size)
+
+    def forward(self, I_s, I_t):
+        return self.ssim_loss(I_s, I_t)
+
+
+class CycleConsistencyLoss(nn.Module):
+    def __init__(self, image_size: Tuple[int, int]):
+        super().__init__()
+
+        # generate standard grid for image (no flow applied yet)
+        ny, nx = image_size
+        vx = torch.linspace(-1, 1, nx)
+        vy = torch.linspace(-1, 1, ny)
+        grid_x, grid_y = torch.meshgrid(vx, vy, indexing="xy")
+        grid = torch.stack([grid_x, grid_y]).unsqueeze(0)  # (B, 2, H, W)
+        self.register_buffer("grid", grid)
+
+    def forward(self, F_st, F_ts):
+        F_cycle = F.grid_sample(F_ts, F_st)
+
+        torch.abs(F_cycle - self.grid)
+
+        # the original paper define this as 2-norm, but their code is not
         pass
 
 
 class MatchabilityLoss(nn.Module):
     def __init__(self):
-        pass
-
-    def forward(self):
-        pass
-
-
-class CycleConsistencyLoss(nn.Module):
-    def __init__(self):
-        pass
+        super().__init__()
 
     def forward(self):
         pass
