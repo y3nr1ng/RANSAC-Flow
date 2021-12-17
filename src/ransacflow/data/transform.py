@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms.functional as F
 from torchvision.transforms import RandomCrop, RandomHorizontalFlip, ToTensor
+from torchvision.transforms.functional_pil import affine
 
 
 class RandomCropImagePair(RandomCrop):
@@ -47,3 +48,27 @@ class RandomHorizontalFlipImagePair(RandomHorizontalFlip):
 class ToTensorImagePair(ToTensor):
     def __call__(self, im_pair):
         return F.to_tensor(im_pair[0]), F.to_tensor(im_pair[1])
+
+
+class ToTensorValidationPair(ToTensor):
+    """
+    A tailored ToTensor operation for validation pairs.
+
+    We need this custom transformationi since validation set returns
+        (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
+    Each of them needs to convert to tensor independently.
+    """
+
+    def __call__(self, item):
+        (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
+
+        # images, convert from (H, W, C) to (C, H, W)
+        src_image = F.to_tensor(src_image)
+        tgt_image = F.to_tensor(tgt_image)
+
+        # rest of the ndarray can transform to tensor directly
+        src_feat = torch.from_numpy(src_feat)
+        tgt_feat = torch.from_numpy(tgt_feat)
+        affine_mat = torch.from_numpy(affine_mat)
+
+        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat

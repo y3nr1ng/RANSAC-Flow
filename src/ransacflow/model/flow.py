@@ -23,15 +23,19 @@ def conv2d_3x3(in_channels: int, out_channels: int):
 
 class BaseFlowPredictor(nn.Module):
     """
+
+    All output from child classes are downsized by the feature extractor, we need to
+    upsample it back to original size. This operation is left for user, since data pass
+    to this network is already in feature space. One can upsample by
+        flow = F.interpolate(flow, size=image_size, mode='bilinear')
+
     Args:
-        image_size (tuple of int): 2D image size.
         kernel_size (TBD): TBD
     """
 
-    def __init__(self, image_size: Union[int, Tuple[int, int]], kernel_size: int):
+    def __init__(self, kernel_size: int):
         super().__init__()
 
-        self.image_size = image_size
         self.kernel_size = kernel_size
 
         self.relu = nn.ReLU(inplace=True)
@@ -46,14 +50,6 @@ class BaseFlowPredictor(nn.Module):
         self.bn3 = nn.BatchNorm2d(128)
 
     def forward(self, x):
-        x = self._forward(x)
-
-        # since all child class will need upsample later on, we do it here
-        x = F.interpolate(x, size=self.image_size, mode="bilinear")
-
-        return x
-
-    def _forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -66,12 +62,20 @@ class BaseFlowPredictor(nn.Module):
         x = self.bn3(x)
         x = self.relu(x)
 
+        # this output is simply the CNN result, need to add an activation layer by
+        # child classes to make it usable
         return x
 
 
 class FlowPredictor(BaseFlowPredictor):
     """
     TBD
+
+    Output of the flow prediction is within [-1, 1], which is a relative length in the
+    K-by-K window. Need to scale it to be proportional to image size, such as
+        ny, nx = image_size
+        flow_x /= nx / 2.0
+        flow_y /= ny / 2.0
 
     Args:
         TBD
@@ -88,20 +92,13 @@ class FlowPredictor(BaseFlowPredictor):
         # generate the for local coordinate [-K//2, K//2]
         ks = torch.arange(0, self.kernel_size) - self.kernel_size // 2
         grid_x, grid_y = torch.meshgrid(ks, ks, indexing="xy")
-        # scale the shift (grid) vector(s) so that it is proportional to the image size
-        # NOTE
-        #   expand() in meshgrid() only creates new view, need explicit assignment to
-        #   allocate the full memory
-        ny, nx = self.image_size
-        grid_x = grid_x / (nx / 2.0)
-        grid_y = grid_y / (ny / 2.0)
 
         # save these grid coordinates, and flatten it along the way
-        self.register_buffer("grid_x", grid_x.view(1, -1, 1, 1), persistent=False)
-        self.register_buffer("grid_y", grid_y.view(1, -1, 1, 1), persistent=False)
+        self.register_buffer("grid_x", grid_x.reshape(1, -1, 1, 1), persistent=False)
+        self.register_buffer("grid_y", grid_y.reshape(1, -1, 1, 1), persistent=False)
 
-    def _forward(self, x):
-        x = super()._forward(x)
+    def forward(self, x):
+        x = super().forward(x)
 
         x = self.conv4(x)
         x = self.softmax(x)
@@ -131,8 +128,8 @@ class MatchabilityPredictor(BaseFlowPredictor):
 
         self.sigmoid = nn.Sigmoid()
 
-    def _forward(self, x):
-        x = super()._forward(x)
+    def forward(self, x):
+        x = super().forward(x)
 
         x = self.conv4(x)
         x = self.sigmoid(x)

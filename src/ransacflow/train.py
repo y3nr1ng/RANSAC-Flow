@@ -3,6 +3,7 @@ import logging
 
 import pytorch_lightning as pl
 import torch
+from torch._C import device
 import torch.nn.functional as F
 
 from .model import (
@@ -32,7 +33,6 @@ class RANSACFlowModel(pl.LightningModule):
         alpha (float): Weight for matchability loss.
         beta (float): Weight for cycle consistency loss.
         gamma (float): Weight for the gradient. FIXME what the fuck is this? stage4?
-        image_size (int): FIXME TBD, we assume it is square
         kernel_size (int): FIXME TBD, we assume it is square
         lr (float): Learning rate.
         pretrained (bool, optional): Use pretrained model.
@@ -43,21 +43,12 @@ class RANSACFlowModel(pl.LightningModule):
         alpha: float,
         beta: float,
         gamma: float,
-        image_size: int,
         kernel_size: int,
         ssim_window_size: int,
         lr: float,
         pretrained: bool = True,
     ):
         super().__init__()
-
-        assert isinstance(image_size, (int, tuple)), "unknown image size data type"
-        if isinstance(image_size, int):
-            # (h, w) = (s, s)
-            image_size = (image_size, image_size)
-        else:
-            # it is a tuple, (h, w)
-            assert len(image_size) == 2, "len(image_size) should equal to 2"
 
         assert kernel_size % 2 == 1, "kernel size has to be odd"
 
@@ -66,21 +57,17 @@ class RANSACFlowModel(pl.LightningModule):
         # instantiate our networks
         self.feature_extractor = FeatureExtractor(pretrained=pretrained)
         self.correlator = NeighborCorrelator(kernel_size)
-        self.flow = FlowPredictor(image_size, kernel_size)
-        self.matchability = MatchabilityPredictor(image_size, kernel_size)
+        self.flow = FlowPredictor(kernel_size)
+        self.matchability = MatchabilityPredictor(kernel_size)
 
         # FIXME how to load weights (in later stages?)
 
         # FIXME set non-trainalbe network to eval()
 
-        # generate standard grid for image (no flow applied yet)
-        ny, nx = image_size
-        vx = torch.linspace(-1, 1, nx)
-        vy = torch.linspace(-1, 1, ny)
-        grid_x, grid_y = torch.meshgrid(vx, vy, indexing="xy")
-        # NOTE F.grid_sample() expects grid dimension (B, H, W, 2)
-        grid = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0)
-        self.register_buffer("grid", grid)
+        # scaling parameters and grids used during flow generation
+        self.image_size = (-1, -1)
+        self.register_buffer("scale", torch.tensor([]), persistent=False)
+        self.register_buffer("grid", torch.tensor([]), persistent=False)
 
         # save everything passes to __init__ as hyperparameters, self.hparams
         # https://pytorch-lightning.readthedocs.io/en/latest/common/hyperparameters.html
@@ -94,6 +81,26 @@ class RANSACFlowModel(pl.LightningModule):
             I_s (TBD): TBD
             I_t (TBD): TBD
         """
+        assert (
+            I_s.shape == I_t.shape
+        ), f"images have different shapes, {I_s.shape} and {I_t.shape}"
+        if self.image_size != I_s.shape[-2:]:
+            self.image_size = I_s.shape[-2:]
+
+            # scale flow vectors
+            scale = torch.tensor(self.image_size[::-1], device=self.scale.device)
+            scale = scale / 2.0
+            self.scale = scale.view(1, -1, 1, 1)
+
+            # recreate grid
+            logger.debug(f"create new grid {self.image_size}")
+            ny, nx = self.image_size
+            vx = torch.linspace(-1, 1, nx, device=self.grid.device)
+            vy = torch.linspace(-1, 1, ny, device=self.grid.device)
+            grid_x, grid_y = torch.meshgrid(vx, vy, indexing="xy")
+            # NOTE F.grid_sample() expects grid dimension (B, H, W, 2)
+            self.grid = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0)
+
         # extract feature correlation map
         f_s = self.feature_extractor(I_s)
         f_t = self.feature_extractor(I_t)
@@ -103,6 +110,11 @@ class RANSACFlowModel(pl.LightningModule):
 
         # estimate flow
         F_st = self.flow(s_st)
+        # upsample it back to original size, see `BaseFlowPredictor`
+        F_st = F.interpolate(F_st, size=tuple(self.image_size), mode="bilinear")
+        # rescale the flow so it is proportional to image size, see `FlowPredictor`
+        # NOTE after going through different combination, direct division seems easiest
+        F_st /= self.scale
 
         # since flow is generally use as grid sampler, we permute its axes to follow the
         # convention uesd in F.grid_sample()
@@ -114,7 +126,16 @@ class RANSACFlowModel(pl.LightningModule):
         return F_st
 
     def validation_step(self, batch, batch_idx):
-        pass
+        # NOTE we don't really have a batch here, refer to commit 555371
+        (I_s, src_feat), (I_t, tgt_feat), affine_mat = batch
+
+        print(f"I_s.shape={I_s.shape}")
+        print(f"I_t.shape={I_t.shape}")
+
+        # predict flow
+        F_st = self(I_s, I_t)
+
+        raise RuntimeError("DEBUG, base, validation_step")
 
 
 class RANSACFlowModelStage1(RANSACFlowModel):
