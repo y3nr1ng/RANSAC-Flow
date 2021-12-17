@@ -54,7 +54,6 @@ class NeighborCorrelator(nn.Module):
         self.zero_padding = nn.ZeroPad2d(kernel_size // 2)
 
     def forward(self, x, y):
-
         # normalize vectors first, so we don't have to divide them later
         x = F.normalize(x)
         y = F.normalize(y)

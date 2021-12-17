@@ -22,19 +22,16 @@ def conv2d_3x3(in_channels: int, out_channels: int):
 
 
 class BaseFlowPredictor(nn.Module):
+    """
+    Args:
+        image_size (tuple of int): 2D image size.
+        kernel_size (TBD): TBD
+    """
+
     def __init__(self, image_size: Union[int, Tuple[int, int]], kernel_size: int):
         super().__init__()
 
-        assert isinstance(image_size, (int, tuple)), "unknown image size data type"
-        if isinstance(image_size, int):
-            # (h, w) = (s, s)
-            image_size = (image_size, image_size)
-        else:
-            # it is a tuple, (h, w)
-            assert len(image_size) == 2, "len(image_size) should equal to 2"
         self.image_size = image_size
-
-        assert kernel_size % 2 == 1, "kernel size has to be odd"
         self.kernel_size = kernel_size
 
         self.relu = nn.ReLU(inplace=True)
@@ -50,7 +47,6 @@ class BaseFlowPredictor(nn.Module):
 
     def forward(self, x):
         x = self._forward(x)
-        print(f"x.shape={x.shape}")
 
         # since all child class will need upsample later on, we do it here
         x = F.interpolate(x, size=self.image_size, mode="bilinear")
