@@ -181,10 +181,10 @@ class MegaDepthValidationDataset(ZippedImageFolder):
             # load and compact feature coordinates
             src_feat_x = np.fromstring(row["XA"], dtype=np.float32, sep=";")
             src_feat_y = np.fromstring(row["YA"], dtype=np.float32, sep=";")
-            src_feat = np.stack([src_feat_y, src_feat_x], axis=-1)
+            src_feat = np.stack([src_feat_x, src_feat_y], axis=-1)
             tgt_feat_x = np.fromstring(row["XB"], dtype=np.float32, sep=";")
             tgt_feat_y = np.fromstring(row["YB"], dtype=np.float32, sep=";")
-            tgt_feat = np.stack([tgt_feat_y, tgt_feat_x], axis=-1)
+            tgt_feat = np.stack([tgt_feat_x, tgt_feat_y], axis=-1)
 
             # NOTE
             # ground truth affine transformation matrix is stored directly
@@ -239,8 +239,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
         self.train_batch_size = train_batch_size
 
     def setup(self, stage: Optional[str] = None):
-        # training set requires some transformations
-        transforms = Compose(
+        train_transforms = Compose(
             [
                 transform.ToTensorImagePair(),
                 transform.RandomCropImagePair(self.image_size),
@@ -248,13 +247,17 @@ class MegaDepthDataModule(pl.LightningDataModule):
             ]
         )
         self.megadepth_train = MegaDepthTrainingDataset(
-            self.path, directory="train", transform=transforms
+            self.path, directory="train", transform=train_transforms
         )
 
+        val_transforms = Compose(
+            [
+                transform.ToTensorValidationPair(),
+                transform.ResizeValidationPair(min_size=self.image_size),
+            ]
+        )
         self.megadepth_val = MegaDepthValidationDataset(
-            self.path,
-            directory="validate",
-            transform=transform.ToTensorValidationPair(),
+            self.path, directory="validate", transform=val_transforms,
         )
 
     def teardown(self, stage: Optional[str] = None):
