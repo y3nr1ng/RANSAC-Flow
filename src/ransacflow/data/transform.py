@@ -5,7 +5,24 @@ input formats.
 import torch
 import torch.nn as nn
 import torchvision.transforms.functional as F
-from torchvision.transforms import RandomCrop, RandomHorizontalFlip, ToTensor, Resize
+from torchvision.transforms import (
+    InterpolationMode,
+    RandomCrop,
+    RandomHorizontalFlip,
+    ToTensor,
+)
+
+import logging
+
+__all__ = [
+    "RandomCropImagePair",
+    "RandomHorizontalFlipImagePair",
+    "ToTensorImagePair",
+    "ResizeValidationPair",
+    "ToTensorValidationPair",
+]
+
+logger = logging.getLogger("ransacflow.data.transform")
 
 
 class RandomCropImagePair(RandomCrop):
@@ -49,18 +66,61 @@ class ToTensorImagePair(ToTensor):
         return F.to_tensor(im_pair[0]), F.to_tensor(im_pair[1])
 
 
-class ResizeValidationPair(Resize):
+class ResizeValidationPair(nn.Module):
     """
 
     TODO resize images, src_image, tgt_image
     TODO resize feature points, src_feat, tgt_feat
 
     Args:
-        Resize ([type]): [description]
+        min_size (int): The minimum allowed for the shoerter edge of the resized image.
+        interpolation (InterpolationMode, optional): Desired interpolation enum defined
+            by `torchvision.transforms.InterpolationMode`.
+        stride (int): Image must be multiply of strides, since we downsample the image
+            during feature extraction.
     """
 
+    def __init__(
+        self,
+        min_size: int,
+        interpolation: InterpolationMode = InterpolationMode.BILINEAR,
+        stride: int = 16,
+    ):
+        super().__init__()
+
+        self.min_size = float(min_size)
+        self.interpolation = interpolation
+        self.stride = stride
+
     def forward(self, item):
-        pass
+        (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
+        assert src_image.shape == tgt_image.shape, "image pair has different dimensions"
+        h, w = src_image.shape[-2:]
+        h, w = float(h), float(w)
+
+        # estimate new output size base on min size constraint
+        ratio = min(h / self.min_size, w / self.min_size)
+        ho, wo = round(h / ratio), round(w / ratio)
+
+        # estimate new output size base on the stride constraint
+        ho, wo = ho // self.stride * self.stride, wo // self.stride * self.stride
+
+        # since we may round up/down in the process, recalculate final ratio to ensure
+        # feature points are at correct positions
+        size = (ho, wo)
+        ratio_h, ratio_w = h / ho, w / wo
+        logger.debug(f"initial_ratio={ratio}, actual_ratio=(w={ratio_w}, h={ratio_h})")
+        ratio = torch.tensor([ratio_w, ratio_h])
+
+        # 1) resize image pairs
+        src_image = F.resize(src_image, size, self.interpolation)
+        tgt_image = F.resize(tgt_image, size, self.interpolation)
+
+        # 2) resize feature points
+        src_feat /= ratio
+        tgt_feat /= ratio
+
+        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
 
 
 class ToTensorValidationPair(ToTensor):
