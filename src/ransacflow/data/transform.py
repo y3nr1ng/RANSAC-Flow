@@ -95,9 +95,10 @@ class ResizeValidationPair(nn.Module):
     def forward(self, item):
         (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
         assert src_image.shape == tgt_image.shape, "image pair has different dimensions"
+        h, w = src_image.shape[-2:]
+        h, w = float(h), float(w)
 
         # estimate new output size base on min size constraint
-        h, w = src_image.shape[-2:]
         ratio = min(h / self.min_size, w / self.min_size)
         ho, wo = round(h / ratio), round(w / ratio)
 
@@ -107,7 +108,8 @@ class ResizeValidationPair(nn.Module):
         # since we may round up/down in the process, recalculate final ratio to ensure
         # feature points are at correct positions
         size = (ho, wo)
-        ratio_h, ratio_w = ho / float(h), wo / float(w)
+        ratio_h, ratio_w = h / ho, w / wo
+        logger.debug(f"initial_ratio={ratio}, actual_ratio=(w={ratio_w}, h={ratio_h})")
         ratio = torch.tensor([ratio_w, ratio_h])
 
         # 1) resize image pairs
@@ -115,8 +117,8 @@ class ResizeValidationPair(nn.Module):
         tgt_image = F.resize(tgt_image, size, self.interpolation)
 
         # 2) resize feature points
-        src_feat *= ratio
-        tgt_feat *= ratio
+        src_feat /= ratio
+        tgt_feat /= ratio
 
         return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
 
