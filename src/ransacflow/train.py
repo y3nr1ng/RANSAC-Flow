@@ -122,11 +122,35 @@ class RANSACFlowModel(pl.LightningModule):
         return F_st
 
     def validation_step(self, batch, batch_idx):
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(1, 2, figsize=(16, 6))
+
         # NOTE we don't really have a batch here, refer to commit 555371
         (I_s, src_feat), (I_t, tgt_feat), affine_mat = batch
 
+        ax[0].imshow(I_s.cpu().squeeze().permute(1, 2, 0))
+        ax[1].imshow(I_t.cpu().squeeze().permute(1, 2, 0))
+
+        ax[0].scatter(
+            src_feat.cpu().squeeze()[..., 0],
+            src_feat.cpu().squeeze()[..., 1],
+            s=30,
+            facecolors="none",
+            edgecolors="blue",
+            marker="o",
+        )
+        ax[1].scatter(
+            tgt_feat.cpu().squeeze()[..., 0],
+            tgt_feat.cpu().squeeze()[..., 1],
+            s=30,
+            facecolors="none",
+            edgecolors="blue",
+            marker="o",
+        )
+
         # align image using affine matrix
-        F_affine = F.affine_grid(affine_mat, I_t.shape)
+        F_affine = F.affine_grid(affine_mat, I_s.shape)
         I_s_warped = F.grid_sample(I_s, F_affine)
 
         # predict flow between I_t and F_0(I_s) ~ I_s_warped
@@ -137,14 +161,67 @@ class RANSACFlowModel(pl.LightningModule):
         F_corrected = F.grid_sample(F_affine.permute(0, 3, 1, 2), F_ts)
         F_corrected = F_corrected.permute(0, 2, 3, 1)
 
+        # estimated flow is [-1, 1], convert it to (target pixel) [0, n) coordinate
+        scale = torch.tensor(I_s.shape[-2:][::-1], device=F_corrected.device) / 2.0
+        F_corrected = (F_corrected + 1) * scale
+
+        print("*** tgt_feat")
+        print(tgt_feat[0, -10:, :])
+
         # calculate alignment error
+        src_feat = torch.round(src_feat)
+        tgt_feat = torch.round(tgt_feat).long()
+
+        tgt_feat_x = tgt_feat[..., 0]
+        tgt_feat_y = tgt_feat[..., 1]
+        src_feat_F = F_corrected[:, tgt_feat_y, tgt_feat_x, :]
+
+        ax[0].scatter(
+            src_feat_F.cpu().squeeze()[..., 0],
+            src_feat_F.cpu().squeeze()[..., 1],
+            s=50,
+            facecolors="none",
+            edgecolors="red",
+            marker="x",
+        )
+
+        src_feat_F = src_feat_F.squeeze(1)
+
+        diff = src_feat - src_feat_F
+        diff = torch.hypot(diff[..., 0], diff[..., 1])
+        print(
+            f"src_feat.shape={src_feat.shape}, src_feat_F.shape={src_feat_F.shape}, diff.shape={diff.shape}"
+        )
+        print(f"src_feat[5]={src_feat[:, :5, :]}")
+        print(f"src_feat_F[5]={src_feat_F[:, :5, :]}")
+        print(f"diff[5]={diff[..., :5]}")
+
+        plt.show()
+
+        raise RuntimeError("DEBUG, base, validation_step, non-iterative")
+
+        ## iterative
         # NOTE though batch is 1, we still keep it here for future work
         src_feat = src_feat.swapaxes(0, 1)
         tgt_feat = tgt_feat.swapaxes(0, 1)
+        px_diff = []
         for src_pt, tgt_pt in zip(src_feat, tgt_feat):
-            print(src_pt.shape)
+            print(f"src={src_pt}, tgt={tgt_pt}")
 
-        raise RuntimeError("DEBUG, base, validation_step")
+            # TODO index into F_corrected, and compare pixel shift differences
+
+            # NOTE in the original paper, they round feature points so they can index
+            # into the flow F without interpolation
+            src_pt = torch.round(src_pt)
+            tgt_pt = torch.round(tgt_pt)
+
+            # TODO is this correct?
+            tgt_x, tgt_y = tgt_pt.long().T
+            src_pt_F = F_corrected[:, tgt_y, tgt_x, :]
+
+            print(f"src={src_pt}, tgt={tgt_pt}, F(src)={src_pt_F}")
+
+            raise RuntimeError("DEBUG, base, validation_step")
 
 
 class RANSACFlowModelStage1(RANSACFlowModel):
