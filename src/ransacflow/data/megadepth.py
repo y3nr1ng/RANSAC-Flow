@@ -229,20 +229,24 @@ class MegaDepthDataModule(pl.LightningDataModule):
     def __init__(
         self,
         path: Path,
-        image_size: Optional[Union[int, tuple]] = 224,
+        train_image_size: Union[int, tuple] = 224,
         train_batch_size: int = 16,
+        val_image_size: Union[int, tuple] = 480,
     ):
         super().__init__()
 
         self.path = path
-        self.image_size = image_size
+
+        self.train_image_size = train_image_size
         self.train_batch_size = train_batch_size
+
+        self.val_image_size = val_image_size
 
     def setup(self, stage: Optional[str] = None):
         train_transforms = Compose(
             [
                 transform.ToTensorImagePair(),
-                transform.RandomCropImagePair(self.image_size),
+                transform.RandomCropImagePair(self.train_image_size),
                 transform.RandomHorizontalFlipImagePair(),
             ]
         )
@@ -253,7 +257,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
         val_transforms = Compose(
             [
                 transform.ToTensorValidationPair(),
-                transform.ResizeValidationPair(min_size=self.image_size),
+                transform.ResizeValidationPair(min_size=self.val_image_size),
             ]
         )
         self.megadepth_val = MegaDepthValidationDataset(
@@ -274,9 +278,9 @@ class MegaDepthDataModule(pl.LightningDataModule):
         return megadepth_train
 
     def val_dataloader(self):
+        # NOTE most torch function has N dimension, so we keep batch_size=1 instead of
+        # disable automatic batching mechanism
         megadepth_val = torch.utils.data.DataLoader(
-            self.megadepth_val,
-            batch_size=1,  # disable autmoatic batching
-            shuffle=False,
+            self.megadepth_val, batch_size=1, shuffle=False,
         )
         return megadepth_val
