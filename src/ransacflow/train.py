@@ -1,6 +1,7 @@
 import itertools
 import logging
 
+import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
@@ -11,7 +12,6 @@ from .model import (
     MatchabilityPredictor,
     NeighborCorrelator,
 )
-
 from .model.loss import ReconstructionLoss
 
 __all__ = [
@@ -68,6 +68,14 @@ class RANSACFlowModel(pl.LightningModule):
         self.register_buffer("scale", torch.tensor([]), persistent=False)
         self.register_buffer("grid", torch.tensor([]), persistent=False)
 
+        # histogram for validation error
+        error_ticks = np.logspace(0, np.log10(36), num=8).round()
+        error_ticks = torch.tensor(error_ticks)
+        self.register_buffer("error_ticks", error_ticks, persistent=False)
+        self.register_buffer(
+            "error_counts", torch.zeros_like(error_ticks), persistent=False
+        )
+
         # save everything passes to __init__ as hyperparameters, self.hparams
         # https://pytorch-lightning.readthedocs.io/en/latest/common/hyperparameters.html
         self.save_hyperparameters()
@@ -122,32 +130,8 @@ class RANSACFlowModel(pl.LightningModule):
         return F_st
 
     def validation_step(self, batch, batch_idx):
-        import matplotlib.pyplot as plt
-
-        fig, ax = plt.subplots(1, 2, figsize=(16, 6))
-
         # NOTE we don't really have a batch here, refer to commit 555371
         (I_s, src_feat), (I_t, tgt_feat), affine_mat = batch
-
-        ax[0].imshow(I_s.cpu().squeeze().permute(1, 2, 0))
-        ax[1].imshow(I_t.cpu().squeeze().permute(1, 2, 0))
-
-        ax[0].scatter(
-            src_feat.cpu().squeeze()[..., 0],
-            src_feat.cpu().squeeze()[..., 1],
-            s=30,
-            facecolors="none",
-            edgecolors="blue",
-            marker="o",
-        )
-        ax[1].scatter(
-            tgt_feat.cpu().squeeze()[..., 0],
-            tgt_feat.cpu().squeeze()[..., 1],
-            s=30,
-            facecolors="none",
-            edgecolors="blue",
-            marker="o",
-        )
 
         # align image using affine matrix
         F_affine = F.affine_grid(affine_mat, I_s.shape)
@@ -165,38 +149,24 @@ class RANSACFlowModel(pl.LightningModule):
         scale = torch.tensor(I_s.shape[-2:][::-1], device=F_corrected.device) / 2.0
         F_corrected = (F_corrected + 1) * scale
 
-        print("*** tgt_feat")
-        print(tgt_feat[0, -10:, :])
-
-        # calculate alignment error
-        src_feat = torch.round(src_feat)
+        # extract estimated source feature points
         tgt_feat = torch.round(tgt_feat).long()
-
         tgt_feat_x = tgt_feat[..., 0]
         tgt_feat_y = tgt_feat[..., 1]
         src_feat_F = F_corrected[:, tgt_feat_y, tgt_feat_x, :]
-
-        ax[0].scatter(
-            src_feat_F.cpu().squeeze()[..., 0],
-            src_feat_F.cpu().squeeze()[..., 1],
-            s=50,
-            facecolors="none",
-            edgecolors="red",
-            marker="x",
-        )
-
+        # H and W dimension becomes (alternative) N dimension, the actual N dimension
+        # is fixed to 1, so we need to squeeze dim 1 to match source tensor
         src_feat_F = src_feat_F.squeeze(1)
 
+        # calculate alignment error
         diff = src_feat - src_feat_F
         diff = torch.hypot(diff[..., 0], diff[..., 1])
-        print(
-            f"src_feat.shape={src_feat.shape}, src_feat_F.shape={src_feat_F.shape}, diff.shape={diff.shape}"
-        )
-        print(f"src_feat[5]={src_feat[:, :5, :]}")
-        print(f"src_feat_F[5]={src_feat_F[:, :5, :]}")
-        print(f"diff[5]={diff[..., :5]}")
 
-        plt.show()
+        # accumulate errors to histogram
+        counts = diff.view(-1, 1) < self.error_ticks
+        counts = torch.sum(counts, dim=0, keepdim=False)
+        print(f"counts.shape={counts.shape}")
+        print(f"counts={counts}")
 
         raise RuntimeError("DEBUG, base, validation_step, non-iterative")
 
