@@ -1,5 +1,6 @@
 import itertools
 import logging
+from typing import List, Optional
 
 import numpy as np
 import pytorch_lightning as pl
@@ -45,6 +46,7 @@ class RANSACFlowModel(pl.LightningModule):
         kernel_size: int,
         ssim_window_size: int,
         lr: float,
+        error_ticks: Optional[List[int]] = None,
         pretrained: bool = True,
     ):
         super().__init__()
@@ -69,7 +71,9 @@ class RANSACFlowModel(pl.LightningModule):
         self.register_buffer("grid", torch.tensor([]), persistent=False)
 
         # histogram for validation error
-        error_ticks = np.logspace(0, np.log10(36), num=8).round()
+        if error_ticks is None:
+            error_ticks = np.logspace(0, np.log10(36), num=8).round()
+            logger.debug(f"generate default pixel error ticks: {error_ticks}")
         self.register_buffer("error_ticks", torch.tensor(error_ticks), persistent=False)
 
         # save everything passes to __init__ as hyperparameters, self.hparams
@@ -162,6 +166,22 @@ class RANSACFlowModel(pl.LightningModule):
         counts = torch.mean(counts.float(), dim=0, keepdim=False)
 
         return counts
+
+    def validation_epoch_end(self, outputs) -> None:
+        outputs = torch.stack(outputs).mean(dim=0)
+
+        for tick, output in zip(self.error_ticks, outputs):
+            print(f"prec@{tick}={output:.5f}")
+
+        # original outputs are effectively accuracy, we want losses
+        outputs = 1 - outputs
+
+        # NOTE original work hard coded prec@8, we use the center index of ticks
+        loss = outputs[len(outputs) // 2]
+
+        raise RuntimeError("DEBUG, validation_epoch_end")
+
+        return loss
 
 
 class RANSACFlowModelStage1(RANSACFlowModel):
