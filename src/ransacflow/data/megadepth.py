@@ -258,6 +258,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
         train_transforms = Compose(
             [
                 transform.ToTensorImagePair(),
+                transform.EnsureRGBImagePair(),
                 transform.RandomCropImagePair(self.train_image_size),
                 transform.RandomHorizontalFlipImagePair(),
             ]
@@ -269,6 +270,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
         val_transforms = Compose(
             [
                 transform.ToTensorValidationPair(),
+                transform.EnsureRGBValidationPair(),
                 transform.ResizeValidationImageFeaturesPair(
                     min_size=self.val_image_size
                 ),

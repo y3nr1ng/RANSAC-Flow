@@ -61,9 +61,40 @@ class RandomHorizontalFlipImagePair(RandomHorizontalFlip):
         return im_pair
 
 
-class ToTensorImagePair(ToTensor):
+class SafeToTensor(nn.Module):
+    def __call__(self, array):
+        return self.to_tensor(array)
+
+    def to_tensor(self, array):
+        try:
+            return F.to_tensor(array)
+        except ValueError:
+            # sometimes input array contains negative strides
+            return F.to_tensor(array.copy())
+
+
+class ToTensorImagePair(SafeToTensor):
     def __call__(self, im_pair):
-        return F.to_tensor(im_pair[0]), F.to_tensor(im_pair[1])
+        return self.to_tensor(im_pair[0]), self.to_tensor(im_pair[1])
+
+
+class EnsureRGBImagePair(nn.Module):
+    def __call__(self, im_pair):
+        im0, im1 = im_pair
+
+        im0 = self._ensure_rgb(im0)
+        im1 = self._ensure_rgb(im1)
+
+        return im0, im1
+
+    def _ensure_rgb(self, im):
+        c = im.shape[-3]
+        assert c in (1, 3), f"unknown image channel size ({c})"
+
+        if im.shape[-3] == 1:
+            im = torch.cat([im] * 3, dim=-3)
+
+        return im
 
 
 class ResizeValidationImageFeatures(nn.Module):
@@ -141,7 +172,7 @@ class ResizeValidationImageFeaturesPair(ResizeValidationImageFeatures):
         return source, target, affine_mat
 
 
-class ToTensorValidationPair(ToTensor):
+class ToTensorValidationPair(SafeToTensor):
     """
     A tailored ToTensor operation for validation pairs.
 
@@ -154,12 +185,22 @@ class ToTensorValidationPair(ToTensor):
         (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
 
         # images, convert from (H, W, C) to (C, H, W)
-        src_image = F.to_tensor(src_image)
-        tgt_image = F.to_tensor(tgt_image)
+        src_image = self.to_tensor(src_image)
+        tgt_image = self.to_tensor(tgt_image)
 
         # rest of the ndarray can transform to tensor directly
         src_feat = torch.from_numpy(src_feat)
         tgt_feat = torch.from_numpy(tgt_feat)
         affine_mat = torch.from_numpy(affine_mat)
+
+        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
+
+
+class EnsureRGBValidationPair(EnsureRGBImagePair):
+    def __call__(self, item):
+        (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
+
+        src_image = self._ensure_rgb(src_image)
+        tgt_image = self._ensure_rgb(tgt_image)
 
         return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
