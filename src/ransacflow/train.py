@@ -172,18 +172,16 @@ class RANSACFlowModel(pl.LightningModule):
 
     def validation_epoch_end(self, outputs) -> None:
         outputs = torch.stack(outputs).mean(dim=0)
-
         for tick, output in zip(self.error_ticks, outputs):
             print(f"prec@{tick}={output:.5f}")
             # TODO organize how these are saved in tb log
 
         # original outputs are effectively accuracy, we want losses
         outputs = 1 - outputs
-
         # NOTE original work hard coded prec@8, we use the center index of ticks
         loss = outputs[len(outputs) // 2]
 
-        # raise RuntimeError("DEBUG, validation_epoch_end")
+        self.log("val_loss", loss)
 
         return loss
 
