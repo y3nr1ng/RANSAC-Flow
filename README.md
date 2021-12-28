@@ -22,10 +22,10 @@ pip install -e .
 ```
 this will install all needed dependency, and soft link this project as an installed package.
 You can now use this repository by
-```
+```python
 import ransacflow
 ```
-or continue with our demo notebooks under `notebooks/`.
+or continue with our demo notebooks under [`notebooks/`](notebooks/).
 
 It needs to download files to get it up and running, and these destination folder are parallel to the project folder.
 
