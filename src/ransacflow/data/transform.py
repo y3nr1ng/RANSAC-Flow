@@ -109,7 +109,9 @@ class ResizeValidationPair(nn.Module):
         # feature points are at correct positions
         size = (ho, wo)
         ratio_h, ratio_w = h / ho, w / wo
-        logger.debug(f"initial_ratio={ratio}, actual_ratio=(w={ratio_w}, h={ratio_h})")
+        logger.debug(
+            f"init_ratio={ratio:.5f}, actual_ratio=(w={ratio_w:.5f}, h={ratio_h:.5f})"
+        )
         ratio = torch.tensor([ratio_w, ratio_h])
 
         # 1) resize image pairs
