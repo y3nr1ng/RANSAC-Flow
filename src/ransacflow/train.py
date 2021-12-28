@@ -70,11 +70,7 @@ class RANSACFlowModel(pl.LightningModule):
 
         # histogram for validation error
         error_ticks = np.logspace(0, np.log10(36), num=8).round()
-        error_ticks = torch.tensor(error_ticks)
-        self.register_buffer("error_ticks", error_ticks, persistent=False)
-        self.register_buffer(
-            "error_counts", torch.zeros_like(error_ticks), persistent=False
-        )
+        self.register_buffer("error_ticks", torch.tensor(error_ticks), persistent=False)
 
         # save everything passes to __init__ as hyperparameters, self.hparams
         # https://pytorch-lightning.readthedocs.io/en/latest/common/hyperparameters.html
@@ -158,40 +154,14 @@ class RANSACFlowModel(pl.LightningModule):
         # is fixed to 1, so we need to squeeze dim 1 to match source tensor
         src_feat_F = src_feat_F.squeeze(1)
 
-        # calculate alignment error
+        # calculate pixel alignment errors...
         diff = src_feat - src_feat_F
         diff = torch.hypot(diff[..., 0], diff[..., 1])
-
-        # accumulate errors to histogram
+        # ... and corresponding percentages
         counts = diff.view(-1, 1) < self.error_ticks
-        counts = torch.sum(counts, dim=0, keepdim=False)
-        print(f"counts.shape={counts.shape}")
-        print(f"counts={counts}")
+        counts = torch.mean(counts.float(), dim=0, keepdim=False)
 
-        raise RuntimeError("DEBUG, base, validation_step, non-iterative")
-
-        ## iterative
-        # NOTE though batch is 1, we still keep it here for future work
-        src_feat = src_feat.swapaxes(0, 1)
-        tgt_feat = tgt_feat.swapaxes(0, 1)
-        px_diff = []
-        for src_pt, tgt_pt in zip(src_feat, tgt_feat):
-            print(f"src={src_pt}, tgt={tgt_pt}")
-
-            # TODO index into F_corrected, and compare pixel shift differences
-
-            # NOTE in the original paper, they round feature points so they can index
-            # into the flow F without interpolation
-            src_pt = torch.round(src_pt)
-            tgt_pt = torch.round(tgt_pt)
-
-            # TODO is this correct?
-            tgt_x, tgt_y = tgt_pt.long().T
-            src_pt_F = F_corrected[:, tgt_y, tgt_x, :]
-
-            print(f"src={src_pt}, tgt={tgt_pt}, F(src)={src_pt_F}")
-
-            raise RuntimeError("DEBUG, base, validation_step")
+        return counts
 
 
 class RANSACFlowModelStage1(RANSACFlowModel):
