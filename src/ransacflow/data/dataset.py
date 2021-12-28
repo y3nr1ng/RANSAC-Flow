@@ -17,6 +17,10 @@ class wrapped_mmap(mmap.mmap):
     `_SharedFile`, which further requires the object to be `seekable`, as in `IOBase`
     definition. However, `mmap` object does not have this function, this wrapper is a
     hacky attempt to patch this.
+
+    Reference:
+        https://github.com/python/cpython/blob/7c5b01b5101923fc38274c491bd55239ee9f0416/
+        Lib/zipfile.py#L744
     """
 
     def seekable(self) -> bool:
