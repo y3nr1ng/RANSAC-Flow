@@ -18,7 +18,7 @@ __all__ = [
     "RandomCropImagePair",
     "RandomHorizontalFlipImagePair",
     "ToTensorImagePair",
-    "ResizeValidationPair",
+    "ResizeValidationImageFeaturesPair",
     "ToTensorValidationPair",
 ]
 
@@ -66,18 +66,16 @@ class ToTensorImagePair(ToTensor):
         return F.to_tensor(im_pair[0]), F.to_tensor(im_pair[1])
 
 
-class ResizeValidationPair(nn.Module):
+class ResizeValidationImageFeatures(nn.Module):
     """
-
-    TODO resize images, src_image, tgt_image
-    TODO resize feature points, src_feat, tgt_feat
+    TBD
 
     Args:
         min_size (int): The minimum allowed for the shoerter edge of the resized image.
         interpolation (InterpolationMode, optional): Desired interpolation enum defined
             by `torchvision.transforms.InterpolationMode`.
-        stride (int): Image must be multiply of strides, since we downsample the image
-            during feature extraction.
+        stride (int, optional): Image must be multiply of strides, since we downsample
+            the image during feature extraction.
     """
 
     def __init__(
@@ -93,9 +91,9 @@ class ResizeValidationPair(nn.Module):
         self.stride = stride
 
     def forward(self, item):
-        (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
-        assert src_image.shape == tgt_image.shape, "image pair has different dimensions"
-        h, w = src_image.shape[-2:]
+        image, features = item
+
+        h, w = image.shape[-2:]
         h, w = float(h), float(w)
 
         # estimate new output size base on min size constraint
@@ -115,14 +113,32 @@ class ResizeValidationPair(nn.Module):
         ratio = torch.tensor([ratio_w, ratio_h])
 
         # 1) resize image pairs
-        src_image = F.resize(src_image, size, self.interpolation)
-        tgt_image = F.resize(tgt_image, size, self.interpolation)
-
+        image = F.resize(image, size, self.interpolation)
         # 2) resize feature points
-        src_feat /= ratio
-        tgt_feat /= ratio
+        features /= ratio
 
-        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
+        return image, features
+
+
+class ResizeValidationImageFeaturesPair(ResizeValidationImageFeatures):
+    """
+    Similar to `ResizeValidationImageFeatures` but resize both source and target.
+
+    Args:
+        min_size (int): The minimum allowed for the shoerter edge of the resized image.
+        interpolation (InterpolationMode, optional): Desired interpolation enum defined
+            by `torchvision.transforms.InterpolationMode`.
+        stride (int, optional): Image must be multiply of strides, since we downsample
+            the image during feature extraction.
+    """
+
+    def forward(self, item):
+        source, target, affine_mat = item
+
+        source = super().forward(source)
+        target = super().forward(target)
+
+        return source, target, affine_mat
 
 
 class ToTensorValidationPair(ToTensor):

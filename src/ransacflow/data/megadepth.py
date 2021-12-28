@@ -73,6 +73,10 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
             image_pair.append(image)
         image_pair = tuple(image_pair)
 
+        assert (
+            image_pair[0].shape == image_pair[1].shape
+        ), f"index {index}, image pair has different dimensions"
+
         if self.transform is not None:
             image_pair = self.transform(image_pair)
 
@@ -205,6 +209,10 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         fp = io.BytesIO(tgt_path.read_bytes())
         tgt_image = self.loader(fp)
 
+        # image pair can have different size, but feature points must match
+        # this project does not take occlusion in to consideration
+        assert len(src_feat) == len(tgt_feat), f"index {index}, missing feature points"
+
         # pack them up
         source = src_image, src_feat
         target = tgt_image, tgt_feat
@@ -261,7 +269,9 @@ class MegaDepthDataModule(pl.LightningDataModule):
         val_transforms = Compose(
             [
                 transform.ToTensorValidationPair(),
-                transform.ResizeValidationPair(min_size=self.val_image_size),
+                transform.ResizeValidationImageFeaturesPair(
+                    min_size=self.val_image_size
+                ),
             ]
         )
         self.megadepth_val = MegaDepthValidationDataset(

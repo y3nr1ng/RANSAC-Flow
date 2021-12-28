@@ -73,7 +73,9 @@ class RANSACFlowModel(pl.LightningModule):
         # histogram for validation error
         if error_ticks is None:
             error_ticks = np.logspace(0, np.log10(36), num=8).round()
-            logger.debug(f"generate default pixel error ticks: {error_ticks}")
+            logger.debug(
+                f"generate default pixel error ticks: {list(error_ticks.astype(int))}"
+            )
         self.register_buffer("error_ticks", torch.tensor(error_ticks), persistent=False)
 
         # save everything passes to __init__ as hyperparameters, self.hparams
@@ -134,10 +136,11 @@ class RANSACFlowModel(pl.LightningModule):
         (I_s, src_feat), (I_t, tgt_feat), affine_mat = batch
 
         # align image using affine matrix
-        F_affine = F.affine_grid(affine_mat, I_s.shape)
+        # NOTE we generate grid based on I_t, since I_t ~ I_s_warped, see next segment
+        F_affine = F.affine_grid(affine_mat, I_t.shape)
         I_s_warped = F.grid_sample(I_s, F_affine)
 
-        # predict flow between I_t and F_0(I_s) ~ I_s_warped
+        # predict flow between I_t and F_0(I_s)
         # I_t and I_s_warped should closely match each other
         F_ts = self(I_t, I_s_warped)
 
@@ -172,6 +175,7 @@ class RANSACFlowModel(pl.LightningModule):
 
         for tick, output in zip(self.error_ticks, outputs):
             print(f"prec@{tick}={output:.5f}")
+            # TODO organize how these are saved in tb log
 
         # original outputs are effectively accuracy, we want losses
         outputs = 1 - outputs
@@ -179,7 +183,7 @@ class RANSACFlowModel(pl.LightningModule):
         # NOTE original work hard coded prec@8, we use the center index of ticks
         loss = outputs[len(outputs) // 2]
 
-        #raise RuntimeError("DEBUG, validation_epoch_end")
+        # raise RuntimeError("DEBUG, validation_epoch_end")
 
         return loss
 
