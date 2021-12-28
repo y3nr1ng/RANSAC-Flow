@@ -179,7 +179,7 @@ class RANSACFlowModel(pl.LightningModule):
         # NOTE original work hard coded prec@8, we use the center index of ticks
         loss = outputs[len(outputs) // 2]
 
-        raise RuntimeError("DEBUG, validation_epoch_end")
+        #raise RuntimeError("DEBUG, validation_epoch_end")
 
         return loss
 

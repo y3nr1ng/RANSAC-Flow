@@ -1,4 +1,5 @@
 import io
+import mmap
 import zipfile
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, List, Optional, Tuple
@@ -8,6 +9,19 @@ from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import has_file_allowed_extension
 
 default_loader = skimage.io.imread
+
+
+class wrapped_mmap(mmap.mmap):
+    """
+    For some magical reason, `zipfile.ZipFile` wraps incoming file-like object in
+    `_SharedFile`, which further requires the object to be `seekable`, as in `IOBase`
+    definition. However, `mmap` object does not have this function, this wrapper is a
+    hacky attempt to patch this.
+    """
+
+    def seekable(self) -> bool:
+        """Return True if the stream supports random access."""
+        return True
 
 
 class ZippedImageFolder(ImageFolder):
@@ -20,8 +34,12 @@ class ZippedImageFolder(ImageFolder):
         loader: Callable[[BinaryIO], Any] = default_loader,
         is_valid_file: Optional[Callable[[str], bool]] = None,
     ):
+        # using memmory mapped file handle to ensure this works with multiprocess
+        fd = open(root, mode="rb")
+        fd_mapped = wrapped_mmap(fd.fileno(), length=0, access=mmap.ACCESS_READ)
+
         # all subsequent path calls are confined in this zip file
-        self._handle = zipfile.ZipFile(root, "r")
+        self._handle = zipfile.ZipFile(fd_mapped, "r")
         directory = zipfile.Path(self._handle, directory)
 
         # while we specify `Path` as directory type, we are actually working with #

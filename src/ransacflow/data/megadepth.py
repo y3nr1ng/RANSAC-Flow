@@ -221,9 +221,10 @@ class MegaDepthDataModule(pl.LightningDataModule):
 
     Args:
         path (Path): Path to the ZIP file.
-        image_size (int or tuple of int, optional): Crop input image to this size.
+        train_image_size (int or tuple of int, optional): Crop input image to this size.
         train_batch_size (int, optional): Samples per batch to load during training.
-        val_batch_size (int, optional): Samples per batch during validation.
+        val_image_size (int, optional): Minimum image size during validation.
+        num_workers (int, optional): How many subprocesses to use for data loading.
     """
 
     def __init__(
@@ -232,6 +233,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
         train_image_size: Union[int, tuple] = 224,
         train_batch_size: int = 16,
         val_image_size: Union[int, tuple] = 480,
+        num_workers: int = 2,
     ):
         super().__init__()
 
@@ -241,6 +243,8 @@ class MegaDepthDataModule(pl.LightningDataModule):
         self.train_batch_size = train_batch_size
 
         self.val_image_size = val_image_size
+
+        self.num_workers = num_workers
 
     def setup(self, stage: Optional[str] = None):
         train_transforms = Compose(
@@ -274,6 +278,7 @@ class MegaDepthDataModule(pl.LightningDataModule):
             batch_size=self.train_batch_size,
             shuffle=True,
             drop_last=True,
+            num_workers=self.num_workers,
         )
         return megadepth_train
 
@@ -281,6 +286,9 @@ class MegaDepthDataModule(pl.LightningDataModule):
         # NOTE most torch function has N dimension, so we keep batch_size=1 instead of
         # disable automatic batching mechanism
         megadepth_val = torch.utils.data.DataLoader(
-            self.megadepth_val, batch_size=1, shuffle=False,
+            self.megadepth_val,
+            batch_size=1,
+            shuffle=False,
+            num_workers=self.num_workers,
         )
         return megadepth_val
