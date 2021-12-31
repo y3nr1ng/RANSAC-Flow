@@ -1,12 +1,15 @@
 import io
 import mmap
-import zipfile
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, List, Optional, Tuple
+from zipfile import ZipFile
 
 import skimage.io
 from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import has_file_allowed_extension
+
+__all__ = ["ZippedImageFolder"]
 
 default_loader = skimage.io.imread
 
@@ -41,29 +44,31 @@ class ZippedImageFolder(ImageFolder):
         # using memmory mapped file handle to ensure this works with multiprocess
         fd = open(root, mode="rb")
         fd_mapped = wrapped_mmap(fd.fileno(), length=0, access=mmap.ACCESS_READ)
+        self._handle = ZipFile(fd_mapped, "r")
 
-        # all subsequent path calls are confined in this zip file
-        self._handle = zipfile.ZipFile(fd_mapped, "r")
-        directory = zipfile.Path(self._handle, directory)
+        # NOTE necessary evil to leak the ZIP handle as private member, currently don't
+        # have better way to expose this in __getitem__
+        zip_path = (self._handle, Path(directory))
 
-        # while we specify `Path` as directory type, we are actually working with #
-        # zipfile.Path for zipped folder
         super().__init__(
-            directory,
+            zip_path,
             transform=transform,
             target_transform=target_transform,
             loader=loader,
             is_valid_file=is_valid_file,
         )
 
-    def find_classes(self, directory: Path) -> Tuple[List[str], Dict[str, int]]:
+    def find_classes(
+        self, zip_path: Tuple[ZipFile, Path]
+    ) -> Tuple[List[str], Dict[str, int]]:
         """
         Find class folders in a dataset.
 
         This method follows the original implementation, but operates inside a ZIP file.
 
         Args:
-            directory (Path): Directory path inside the ZIP file.
+            zip_path (tuple of (ZipFile, Path)):
+                A opened zip file and root path in the file.
 
         Raises:
             FileNotFounderror: If `directory` has no class folders.
@@ -72,22 +77,26 @@ class ZippedImageFolder(ImageFolder):
             (Tuple[List[str], Dict[str, int]]): List of all classes, and a dictionary
                 mapping each class to an index.
         """
-        # normalize directory with trailing slash
-        #   https://bugs.python.org/issue21039
-        directory /= ""
-        if not directory.exists():
-            raise ValueError(f"unable to locate '{directory}' in the ZIP file")
+        handle, directory = zip_path
 
-        classes = sorted(entry.name for entry in directory.iterdir() if entry.is_dir())
+        classes = set()
+        for file in handle.namelist():
+            try:
+                path = Path(file).relative_to(directory)
+                classes.add(path.parent)
+            except ValueError:
+                # does not belong to `directory`
+                pass
+
+        classes = list(classes)
         if not classes:
             raise FileNotFoundError(f"could not find any class folder in '{directory}'")
 
         class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
         return classes, class_to_idx
 
-    @staticmethod
     def make_dataset(
-        directory: Path,
+        zip_path: Tuple[ZipFile, Path],
         class_to_idx: Dict[str, int],
         extensions: Optional[Tuple[str, ...]] = None,
         is_valid_file: Optional[Callable[[str], bool]] = None,
@@ -98,12 +107,15 @@ class ZippedImageFolder(ImageFolder):
         This method follows the original implementation, but operates inside a ZIP file.
 
         Args:
-            directory (Path): Directory path inside the ZIP file.
+            zip_path (tuple of (ZipFile, Path)):
+                A opened zip file and root path in the file.
             class_to_idx (Dict[str, int]): Dictionary mapping class name to class index.
             extensions (Tuple[int, ...], optional): A list of allowed extensions.
             is_valid_file (Callable[[str], bool], optional): A function that takes path
                 of a file and checks if it is a valid file.
         """
+        handle, directory = zip_path
+
         if class_to_idx is None:
             # we explicitly want to use `find_classes` method
             raise ValueError("'class_to_idx' parameter cannot be None")
@@ -116,28 +128,33 @@ class ZippedImageFolder(ImageFolder):
             # x should be a Path-like object
             is_valid_file = lambda x: has_file_allowed_extension(x, extensions)
 
-        instances = []
-        available_classes = set()
-        for target_class in sorted(class_to_idx.keys()):
-            class_index = class_to_idx[target_class]
-            target_dir = directory / target_class
-            if not target_dir.is_dir():
+        files = list(handle.infolist())
+
+        instances = defaultdict(list)
+        for file in files:
+            # NOTE scan over members again, but this time we will only process further
+            # for those in class_to_idx list, allowing some customization to remove
+            # unwanted classes
+            try:
+                path = Path(file.filename).relative_to(directory)
+            except ValueError:
                 continue
-            for file in target_dir.iterdir():
-                file = file.name  # we only want str
-                if is_valid_file(file):
-                    item = file, class_index
-                    instances.append(item)
+            else:
+                target_class = path.parent
+                if target_class not in class_to_idx:
+                    continue
 
-                    if target_class not in available_classes:
-                        available_classes.add(target_class)
+            if is_valid_file(file.filename):
+                instances[target_class].append(file)
 
-        empty_classes = set(class_to_idx.keys()) - available_classes
+        empty_classes = set(class_to_idx.keys()) - set(instances.keys())
         if empty_classes:
             raise FileNotFoundError(
                 f"found no valid file for classes {sorted(empty_classes)}"
             )
 
+        # convert dictionary of lists to list of key-value pairs
+        instances = [(v, k) for k in instances for v in instances[k]]
         return instances
 
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
@@ -148,10 +165,10 @@ class ZippedImageFolder(ImageFolder):
         Returns:
             (sample, target) where target is class_index of the target class.
         """
-        path, target = self.samples[index]
+        file, target = self.samples[index]
 
-        fp = io.BytesIO(path.read_bytes())
-        sample = self.loader(fp)
+        stream = self._handle.open(file, "r")
+        sample = self.loader(stream)
 
         if self.transform is not None:
             sample = self.transform(sample)
