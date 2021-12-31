@@ -1,6 +1,8 @@
 import itertools
 import logging
+from typing import List, Optional
 
+import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
@@ -11,7 +13,6 @@ from .model import (
     MatchabilityPredictor,
     NeighborCorrelator,
 )
-
 from .model.loss import ReconstructionLoss
 
 __all__ = [
@@ -45,6 +46,7 @@ class RANSACFlowModel(pl.LightningModule):
         kernel_size: int,
         ssim_window_size: int,
         lr: float,
+        error_ticks: Optional[List[int]] = None,
         pretrained: bool = True,
     ):
         super().__init__()
@@ -67,6 +69,14 @@ class RANSACFlowModel(pl.LightningModule):
         self.image_size = (-1, -1)
         self.register_buffer("scale", torch.tensor([]), persistent=False)
         self.register_buffer("grid", torch.tensor([]), persistent=False)
+
+        # histogram for validation error
+        if error_ticks is None:
+            error_ticks = np.logspace(0, np.log10(36), num=8).round()
+            logger.debug(
+                f"generate default pixel error ticks: {list(error_ticks.astype(int))}"
+            )
+        self.register_buffer("error_ticks", torch.tensor(error_ticks), persistent=False)
 
         # save everything passes to __init__ as hyperparameters, self.hparams
         # https://pytorch-lightning.readthedocs.io/en/latest/common/hyperparameters.html
@@ -126,10 +136,11 @@ class RANSACFlowModel(pl.LightningModule):
         (I_s, src_feat), (I_t, tgt_feat), affine_mat = batch
 
         # align image using affine matrix
+        # NOTE we generate grid based on I_t, since I_t ~ I_s_warped, see next segment
         F_affine = F.affine_grid(affine_mat, I_t.shape)
         I_s_warped = F.grid_sample(I_s, F_affine)
 
-        # predict flow between I_t and F_0(I_s) ~ I_s_warped
+        # predict flow between I_t and F_0(I_s)
         # I_t and I_s_warped should closely match each other
         F_ts = self(I_t, I_s_warped)
 
@@ -137,14 +148,42 @@ class RANSACFlowModel(pl.LightningModule):
         F_corrected = F.grid_sample(F_affine.permute(0, 3, 1, 2), F_ts)
         F_corrected = F_corrected.permute(0, 2, 3, 1)
 
-        # calculate alignment error
-        # NOTE though batch is 1, we still keep it here for future work
-        src_feat = src_feat.swapaxes(0, 1)
-        tgt_feat = tgt_feat.swapaxes(0, 1)
-        for src_pt, tgt_pt in zip(src_feat, tgt_feat):
-            print(src_pt.shape)
+        # estimated flow is [-1, 1], convert it to (target pixel) [0, n) coordinate
+        scale = torch.tensor(I_s.shape[-2:][::-1], device=F_corrected.device) / 2.0
+        F_corrected = (F_corrected + 1) * scale
 
-        raise RuntimeError("DEBUG, base, validation_step")
+        # extract estimated source feature points
+        tgt_feat = torch.round(tgt_feat).long()
+        tgt_feat_x = tgt_feat[..., 0]
+        tgt_feat_y = tgt_feat[..., 1]
+        src_feat_F = F_corrected[:, tgt_feat_y, tgt_feat_x, :]
+        # H and W dimension becomes (alternative) N dimension, the actual N dimension
+        # is fixed to 1, so we need to squeeze dim 1 to match source tensor
+        src_feat_F = src_feat_F.squeeze(1)
+
+        # calculate pixel alignment errors...
+        diff = src_feat - src_feat_F
+        diff = torch.hypot(diff[..., 0], diff[..., 1])
+        # ... and corresponding percentages
+        counts = diff.view(-1, 1) < self.error_ticks
+        counts = torch.mean(counts.float(), dim=0, keepdim=False)
+
+        return counts
+
+    def validation_epoch_end(self, outputs) -> None:
+        outputs = torch.stack(outputs).mean(dim=0)
+        for tick, output in zip(self.error_ticks, outputs):
+            print(f"prec@{tick}={output:.5f}")
+            # TODO organize how these are saved in tb log
+
+        # original outputs are effectively accuracy, we want losses
+        outputs = 1 - outputs
+        # NOTE original work hard coded prec@8, we use the center index of ticks
+        loss = outputs[len(outputs) // 2]
+
+        self.log("val_loss", loss)
+
+        return loss
 
 
 class RANSACFlowModelStage1(RANSACFlowModel):

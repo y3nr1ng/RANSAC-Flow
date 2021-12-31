@@ -18,7 +18,7 @@ __all__ = [
     "RandomCropImagePair",
     "RandomHorizontalFlipImagePair",
     "ToTensorImagePair",
-    "ResizeValidationPair",
+    "ResizeValidationImageFeaturesPair",
     "ToTensorValidationPair",
 ]
 
@@ -61,23 +61,52 @@ class RandomHorizontalFlipImagePair(RandomHorizontalFlip):
         return im_pair
 
 
-class ToTensorImagePair(ToTensor):
+class SafeToTensor(nn.Module):
+    def __call__(self, array):
+        return self.to_tensor(array)
+
+    def to_tensor(self, array):
+        try:
+            return F.to_tensor(array)
+        except ValueError:
+            # sometimes input array contains negative strides
+            return F.to_tensor(array.copy())
+
+
+class ToTensorImagePair(SafeToTensor):
     def __call__(self, im_pair):
-        return F.to_tensor(im_pair[0]), F.to_tensor(im_pair[1])
+        return self.to_tensor(im_pair[0]), self.to_tensor(im_pair[1])
 
 
-class ResizeValidationPair(nn.Module):
+class EnsureRGBImagePair(nn.Module):
+    def __call__(self, im_pair):
+        im0, im1 = im_pair
+
+        im0 = self._ensure_rgb(im0)
+        im1 = self._ensure_rgb(im1)
+
+        return im0, im1
+
+    def _ensure_rgb(self, im):
+        c = im.shape[-3]
+        assert c in (1, 3), f"unknown image channel size ({c})"
+
+        if im.shape[-3] == 1:
+            im = torch.cat([im] * 3, dim=-3)
+
+        return im
+
+
+class ResizeValidationImageFeatures(nn.Module):
     """
-
-    TODO resize images, src_image, tgt_image
-    TODO resize feature points, src_feat, tgt_feat
+    TBD
 
     Args:
         min_size (int): The minimum allowed for the shoerter edge of the resized image.
         interpolation (InterpolationMode, optional): Desired interpolation enum defined
             by `torchvision.transforms.InterpolationMode`.
-        stride (int): Image must be multiply of strides, since we downsample the image
-            during feature extraction.
+        stride (int, optional): Image must be multiply of strides, since we downsample
+            the image during feature extraction.
     """
 
     def __init__(
@@ -93,9 +122,9 @@ class ResizeValidationPair(nn.Module):
         self.stride = stride
 
     def forward(self, item):
-        (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
-        assert src_image.shape == tgt_image.shape, "image pair has different dimensions"
-        h, w = src_image.shape[-2:]
+        image, features = item
+
+        h, w = image.shape[-2:]
         h, w = float(h), float(w)
 
         # estimate new output size base on min size constraint
@@ -109,21 +138,41 @@ class ResizeValidationPair(nn.Module):
         # feature points are at correct positions
         size = (ho, wo)
         ratio_h, ratio_w = h / ho, w / wo
-        logger.debug(f"initial_ratio={ratio}, actual_ratio=(w={ratio_w}, h={ratio_h})")
+        logger.debug(
+            f"init_ratio={ratio:.5f}, actual_ratio=(w={ratio_w:.5f}, h={ratio_h:.5f})"
+        )
         ratio = torch.tensor([ratio_w, ratio_h])
 
         # 1) resize image pairs
-        src_image = F.resize(src_image, size, self.interpolation)
-        tgt_image = F.resize(tgt_image, size, self.interpolation)
-
+        image = F.resize(image, size, self.interpolation)
         # 2) resize feature points
-        src_feat /= ratio
-        tgt_feat /= ratio
+        features /= ratio
 
-        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
+        return image, features
 
 
-class ToTensorValidationPair(ToTensor):
+class ResizeValidationImageFeaturesPair(ResizeValidationImageFeatures):
+    """
+    Similar to `ResizeValidationImageFeatures` but resize both source and target.
+
+    Args:
+        min_size (int): The minimum allowed for the shoerter edge of the resized image.
+        interpolation (InterpolationMode, optional): Desired interpolation enum defined
+            by `torchvision.transforms.InterpolationMode`.
+        stride (int, optional): Image must be multiply of strides, since we downsample
+            the image during feature extraction.
+    """
+
+    def forward(self, item):
+        source, target, affine_mat = item
+
+        source = super().forward(source)
+        target = super().forward(target)
+
+        return source, target, affine_mat
+
+
+class ToTensorValidationPair(SafeToTensor):
     """
     A tailored ToTensor operation for validation pairs.
 
@@ -136,12 +185,22 @@ class ToTensorValidationPair(ToTensor):
         (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
 
         # images, convert from (H, W, C) to (C, H, W)
-        src_image = F.to_tensor(src_image)
-        tgt_image = F.to_tensor(tgt_image)
+        src_image = self.to_tensor(src_image)
+        tgt_image = self.to_tensor(tgt_image)
 
         # rest of the ndarray can transform to tensor directly
         src_feat = torch.from_numpy(src_feat)
         tgt_feat = torch.from_numpy(tgt_feat)
         affine_mat = torch.from_numpy(affine_mat)
+
+        return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
+
+
+class EnsureRGBValidationPair(EnsureRGBImagePair):
+    def __call__(self, item):
+        (src_image, src_feat), (tgt_image, tgt_feat), affine_mat = item
+
+        src_image = self._ensure_rgb(src_image)
+        tgt_image = self._ensure_rgb(tgt_image)
 
         return (src_image, src_feat), (tgt_image, tgt_feat), affine_mat
