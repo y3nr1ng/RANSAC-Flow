@@ -1,8 +1,5 @@
-from typing import Tuple, Union
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 __all__ = ["FlowPredictor", "MatchabilityPredictor"]
 
@@ -78,7 +75,7 @@ class FlowPredictor(BaseFlowPredictor):
         flow_y /= ny / 2.0
 
     Args:
-        TBD
+        kernel_size (TBD): TBD
     """
 
     def __init__(self, *args, **kwargs):
@@ -117,7 +114,7 @@ class MatchabilityPredictor(BaseFlowPredictor):
     TBD
 
     Args:
-        TBD
+        kernel_size (TBD): TBD
     """
 
     def __init__(self, *args, **kwargs):
