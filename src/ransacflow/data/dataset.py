@@ -48,10 +48,10 @@ class ZippedImageFolder(ImageFolder):
 
         # NOTE necessary evil to leak the ZIP handle as private member, currently don't
         # have better way to expose this in __getitem__
-        zip = (self._handle, Path(directory))
+        zip_path = (self._handle, Path(directory))
 
         super().__init__(
-            zip,
+            zip_path,
             transform=transform,
             target_transform=target_transform,
             loader=loader,
@@ -59,7 +59,7 @@ class ZippedImageFolder(ImageFolder):
         )
 
     def find_classes(
-        self, zip: Tuple[ZipFile, Path]
+        self, zip_path: Tuple[ZipFile, Path]
     ) -> Tuple[List[str], Dict[str, int]]:
         """
         Find class folders in a dataset.
@@ -67,7 +67,8 @@ class ZippedImageFolder(ImageFolder):
         This method follows the original implementation, but operates inside a ZIP file.
 
         Args:
-            zip (tuple of (ZipFile, Path)): A opened zip file and root path in the file.
+            zip_path (tuple of (ZipFile, Path)):
+                A opened zip file and root path in the file.
 
         Raises:
             FileNotFounderror: If `directory` has no class folders.
@@ -76,7 +77,7 @@ class ZippedImageFolder(ImageFolder):
             (Tuple[List[str], Dict[str, int]]): List of all classes, and a dictionary
                 mapping each class to an index.
         """
-        handle, directory = zip
+        handle, directory = zip_path
 
         classes = set()
         for file in handle.namelist():
@@ -95,7 +96,7 @@ class ZippedImageFolder(ImageFolder):
         return classes, class_to_idx
 
     def make_dataset(
-        zip: Tuple[ZipFile, Path],
+        zip_path: Tuple[ZipFile, Path],
         class_to_idx: Dict[str, int],
         extensions: Optional[Tuple[str, ...]] = None,
         is_valid_file: Optional[Callable[[str], bool]] = None,
@@ -106,13 +107,14 @@ class ZippedImageFolder(ImageFolder):
         This method follows the original implementation, but operates inside a ZIP file.
 
         Args:
-            zip (tuple of (ZipFile, Path)): A opened zip file and root path in the file.
+            zip_path (tuple of (ZipFile, Path)):
+                A opened zip file and root path in the file.
             class_to_idx (Dict[str, int]): Dictionary mapping class name to class index.
             extensions (Tuple[int, ...], optional): A list of allowed extensions.
             is_valid_file (Callable[[str], bool], optional): A function that takes path
                 of a file and checks if it is a valid file.
         """
-        handle, directory = zip
+        handle, directory = zip_path
 
         if class_to_idx is None:
             # we explicitly want to use `find_classes` method
@@ -165,7 +167,7 @@ class ZippedImageFolder(ImageFolder):
         """
         file, target = self.samples[index]
 
-        stream = self._handle.open(file)
+        stream = self._handle.open(file, "r")
         sample = self.loader(stream)
 
         if self.transform is not None:

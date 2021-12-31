@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
+from torch._C import Value
 from torchvision.transforms import Compose
 
 from . import transform
@@ -30,13 +31,13 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
 
     @staticmethod
     def make_dataset(
-        zip: Tuple[ZipFile, Path],
+        zip_path: Tuple[ZipFile, Path],
         class_to_idx: Dict[str, int],
         extensions: Optional[Tuple[str, ...]] = None,
         is_valid_file: Optional[Callable[[str], bool]] = None,
     ) -> List[Tuple[str, int]]:
         items = super(MegaDepthTrainingDataset, MegaDepthTrainingDataset).make_dataset(
-            zip, class_to_idx, extensions, is_valid_file
+            zip_path, class_to_idx, extensions, is_valid_file
         )
 
         # rebuild dictionary, and do sanity check
@@ -58,7 +59,7 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
         for offset in offsets:
             file = files[offset]
 
-            stream = self._handle.open(file)
+            stream = self._handle.open(file, "r")
             image = self.loader(stream)
 
             image_pair.append(image)
@@ -86,14 +87,17 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         if self.target_transform is not None:
             logger.warning("target_transform is not used")
 
-    def find_classes(self, directory: Path) -> Tuple[List[str], Dict[str, int]]:
+    def find_classes(
+        self, zip_path: Tuple[ZipFile, Path]
+    ) -> Tuple[List[str], Dict[str, int]]:
         """
         Find class folders in a dataset.
 
         This method follows the original implementation, but operates inside a ZIP file.
 
         Args:
-            directory (Path): Directory path inside the ZIP file.
+            zip_path (tuple of (ZipFile, Path)):
+                A opened zip file and root path in the file.
 
         Raises:
             FileNotFounderror: If `directory` has no class folders.
@@ -102,17 +106,16 @@ class MegaDepthValidationDataset(ZippedImageFolder):
             (Tuple[List[str], Dict[str, int]]): List of all classes, and a dictionary
                 mapping each class to an index.
         """
-        # normalize directory with trailing slash
-        #   https://bugs.python.org/issue21039
-        directory /= ""
-        if not directory.exists():
-            raise ValueError(f"unable to locate '{directory}' in the ZIP file")
+        handle, directory = zip_path
 
         # after VisionDataset.__init__, root holds the zipfile.Path to images
         # but, our match list is one folder upward
         path = directory.parent / "matches.csv"
-        fp = io.BytesIO(path.read_bytes())
-        matches = pd.read_csv(fp)
+        stream = handle.open(str(path), "r")
+        matches = pd.read_csv(stream)
+
+        # cache list of dirs
+        dirs = set(Path(file).parent for file in handle.namelist())
 
         # matches[scene] contains the class as integer, convert to list of str
         #   https://pandas.pydata.org/pandas-docs/stable/user_guide/text.html
@@ -120,7 +123,9 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         classes = list(set(classes))
         for cls_name in classes:
             class_path = directory / cls_name
-            if not class_path.exists():
+
+            # as long as there is a file starts with this pass, we will acknowledge it
+            if class_path not in dirs:
                 raise FileNotFoundError(f"could not find '{cls_name}'")
 
         class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
@@ -128,11 +133,13 @@ class MegaDepthValidationDataset(ZippedImageFolder):
 
     @staticmethod
     def make_dataset(
-        directory: Path,
+        zip_path: Tuple[ZipFile, Path],
         class_to_idx: Dict[str, int],
         extensions: Optional[Tuple[str, ...]] = None,
         is_valid_file: Optional[Callable[[str], bool]] = None,
     ) -> List[Tuple[str, int]]:
+        handle, directory = zip_path
+
         if class_to_idx is None:
             # we explicitly want to use `find_classes` method
             raise ValueError("'class_to_idx' parameter cannot be None")
@@ -145,22 +152,17 @@ class MegaDepthValidationDataset(ZippedImageFolder):
             # x should be a Path-like object
             logger.warning("file integrity is not explicitly tested")
 
-        # normalize directory with trailing slash
-        #   https://bugs.python.org/issue21039
-        directory /= ""
-
         # we don't want to work with DataFrame, convert them all to ndarray
         path = directory.parent / "matches.csv"
-        fp = io.BytesIO(path.read_bytes())
-        matches = pd.read_csv(fp)
+        stream = handle.open(str(path), "r")
+        matches = pd.read_csv(stream)
         # convert some units first
         matches["scene"] = matches["scene"].astype("string")
 
-        # load ground truth transformation matrix
+        # load ground truth transformation matrix, it is stored as a dictionary
         path = directory.parent / "affine.pkl"
-        with path.open("r") as fp:
-            # it was stored as a dictionary
-            affine_mats = pickle.load(fp)
+        stream = handle.open(str(path), "r")
+        affine_mats = pickle.load(stream)
 
         instances = []
         for (_, row), affine_mat in zip(matches.iterrows(), affine_mats.values()):
@@ -168,10 +170,11 @@ class MegaDepthValidationDataset(ZippedImageFolder):
             cls_name = row["scene"]
             class_index = class_to_idx[cls_name]
 
-            # zipfile.Path to image
             src_path, tgt_path = row["source_image"], row["target_image"]
             src_path = directory / cls_name / src_path
+            src_path = handle.getinfo(str(src_path))
             tgt_path = directory / cls_name / tgt_path
+            tgt_path = handle.getinfo(str(tgt_path))
 
             # load and compact feature coordinates
             src_feat_x = np.fromstring(row["XA"], dtype=np.float32, sep=";")
@@ -195,10 +198,10 @@ class MegaDepthValidationDataset(ZippedImageFolder):
         tgt_path, tgt_feat = target
 
         # load source and target images
-        fp = io.BytesIO(src_path.read_bytes())
-        src_image = self.loader(fp)
-        fp = io.BytesIO(tgt_path.read_bytes())
-        tgt_image = self.loader(fp)
+        stream = self._handle.open(src_path, "r")
+        src_image = self.loader(stream)
+        stream = self._handle.open(tgt_path, "r")
+        tgt_image = self.loader(stream)
 
         # image pair can have different size, but feature points must match
         # this project does not take occlusion in to consideration
