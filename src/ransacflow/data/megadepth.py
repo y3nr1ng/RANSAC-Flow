@@ -1,9 +1,10 @@
+from collections import defaultdict
 import io
 import logging
 import pickle
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from typing_extensions import runtime
+from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
@@ -29,47 +30,37 @@ class MegaDepthTrainingDataset(ZippedImageFolder):
 
     @staticmethod
     def make_dataset(
-        directory: Path,
+        zip: Tuple[ZipFile, Path],
         class_to_idx: Dict[str, int],
         extensions: Optional[Tuple[str, ...]] = None,
         is_valid_file: Optional[Callable[[str], bool]] = None,
     ) -> List[Tuple[str, int]]:
-        if class_to_idx is None:
-            # we explicitly want to use `find_classes` method
-            raise ValueError("'class_to_idx' parameter cannot be None")
+        items = super(MegaDepthTrainingDataset, MegaDepthTrainingDataset).make_dataset(
+            zip, class_to_idx, extensions, is_valid_file
+        )
 
-        if not ((extensions is None) ^ (is_valid_file is None)):
-            raise ValueError(
-                "both 'extensions' and 'is_valid_file' cannot be None or not None at the same time"
-            )
-        if extensions is not None:
-            # x should be a Path-like object
-            logger.warning("file integrity is not explicitly tested")
+        # rebuild dictionary, and do sanity check
+        instances = defaultdict(list)
+        for file, target_class in items:
+            instances[target_class].append(file)
+        for target_class, files in instances.items():
+            assert len(files) == 3, f"'{target_class}' does not have 3 images"
 
-        instances = []
-        for target_class in sorted(class_to_idx.keys()):
-            class_index = class_to_idx[target_class]
-            target_dir = directory / target_class
-
-            # we know each training set has 3 images, hard coded it to load them
-            files = [target_dir / f"{i+1}.jpg" for i in range(3)]
-            item = files, class_index
-            instances.append(item)
-
-        return instances
+        return list((v, k) for k, v in instances.items())
 
     def __getitem__(self, index: int):
         # we need 2 images, randomly choose from [i+0]-[i+2] (3 images)
         files, _ = self.samples[index]
-        offsets = self._rng.choice(3, size=2)
+        offsets = self._rng.choice(3, size=2, replace=False)
 
         # we cannot use parent __getitem__ since transformations will be off
         image_pair = []
         for offset in offsets:
-            path = files[offset]
+            file = files[offset]
 
-            fp = io.BytesIO(path.read_bytes())
-            image = self.loader(fp)
+            stream = self._handle.open(file)
+            image = self.loader(stream)
+
             image_pair.append(image)
         image_pair = tuple(image_pair)
 
